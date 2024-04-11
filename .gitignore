@@ -1,0 +1,11 @@
+logs/
+models/
+old_logs/
+plots/
+venv/
+.idea/
+__pycache__/
+
+*.log
+*.pt
+*.png
