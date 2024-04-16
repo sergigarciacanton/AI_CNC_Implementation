@@ -13,7 +13,7 @@ import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
 from config import MODEL_PATH, SEED, VNF_PERIOD, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
-    PLOTS_PATH, SAVE_PLOTS
+    PLOTS_PATH, SAVE_PLOTS, TIMESTEPS_LIMIT
 import os
 import logging
 from colorlog import ColoredFormatter
@@ -163,18 +163,16 @@ def get_action_space(obs, previous_node):
     # Get those actions that are feasible: just useful positions of useful edges
     action_space = []
     a = 0
-    i = 9
+    i = 7
     for e in TRAINING_EDGES:
-        if current_node == e[0] and previous_node != e[1]:
-            for _ in range(max(VNF_PERIOD) * DIVISION_FACTOR):
+        if current_node == e[0]:
+            for _ in range(16 * DIVISION_FACTOR):
                 if obs[i] > length:
                     action_space.append(a)
                 i += 1
                 a += 1
         else:
-            i += (max(VNF_PERIOD) * DIVISION_FACTOR)
-            a += (max(VNF_PERIOD) * DIVISION_FACTOR)
-        i += 2
+            a += (16 * DIVISION_FACTOR)
     if action_space == []:
         return [a]
     else:
@@ -195,11 +193,11 @@ class Network(nn.Module):
         super(Network, self).__init__()
 
         self.layers = nn.Sequential(
-            nn.Linear(in_dim, 500),
+            nn.Linear(in_dim, 12),
             nn.ReLU(),
             # nn.Linear(25, 19),
             # nn.ReLU(),
-            nn.Linear(500, out_dim)
+            nn.Linear(12, out_dim)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -371,19 +369,19 @@ class DQNAgent:
 
         # Plot scores
         plt.subplot(131)
-        plt.title(f'Step {step}. Average Score: {np.mean(scores[-1000:]):.2f}')
+        plt.title(f'Step {step}. Average Score: {np.mean(scores[-100:]):.2f}')
         plt.plot(scores, label='Real')
         plt.plot(mean_scores, label='Promig')
 
         # Plot losses
         plt.subplot(132)
-        plt.title('Loss Over Episodes')
+        plt.title('Loss Over Steps')
         plt.plot(losses, label='Real')
         plt.plot(mean_losses, label='Promig')
 
         # Plot epsilons
         plt.subplot(133)
-        plt.title('Epsilons Over Episodes')
+        plt.title('Epsilons Over Steps')
         plt.plot(epsilons)
 
         if SAVE_PLOTS and step == max_steps:
@@ -684,10 +682,10 @@ class DQNAgent:
                 if done:
                     obs, info = self.env.reset(seed=self.seed)
                     scores.append(score)
-                    if len(scores) < monitor_training:
+                    if len(scores) < 100:
                         mean_scores.append(np.mean(scores[0:]))
                     else:
-                        mean_scores.append(np.mean(scores[-monitor_training:]))
+                        mean_scores.append(np.mean(scores[-100:]))
                     score = 0
                     episodes_count += 1
 
@@ -696,10 +694,10 @@ class DQNAgent:
                     # Update the model and record the loss
                     loss = self.update_model()
                     losses.append(loss)
-                    if len(losses) < monitor_training:
+                    if len(losses) < 100:
                         mean_losses.append(np.mean(losses[0:]))
                     else:
-                        mean_losses.append(np.mean(losses[-monitor_training:]))
+                        mean_losses.append(np.mean(losses[-100:]))
                     update_cnt += 1
 
                     # linearly decay epsilon
@@ -719,9 +717,9 @@ class DQNAgent:
 
                 if step % monitor_training == 0:
                     self.logger.info(f"[I] Step: {step} | "
-                                     f"Rewards: {round(np.mean(scores[-monitor_training:]), 3)} | "
-                                     f"Loss: {round(np.mean(losses[-monitor_training:]), 3)} | "
-                                     f"Epsilons: {round(np.mean(epsilons[-monitor_training:]), 3)} | "
+                                     f"Rewards: {round(np.mean(scores[-100:]), 3)} | "
+                                     f"Loss: {round(np.mean(losses[-100:]), 3)} | "
+                                     f"Epsilons: {round(np.mean(epsilons[-100:]), 3)} | "
                                      f"Episodes: {episodes_count}")
 
                 # if update_cnt % evaluation_interval == 0:
@@ -734,12 +732,12 @@ class DQNAgent:
         self.logger.info('[I] Total run time steps: ' + str(step))
         self.logger.info('[I] Total run episodes: ' + str(episodes_count))
         self.logger.info('[I] Total elapsed time: ' + str(end - start))
-        self.logger.info('[I] Final average reward: ' + str(round(np.mean(scores[-monitor_training:]), 3)))
+        self.logger.info('[I] Final average reward: ' + str(round(np.mean(scores[-100:]), 3)))
 
         # Save model
         if episodes_count > 1000:
             date = datetime.now().strftime('%Y%m%d%H%M')
-            model_name = 'model_' + date + '_' + str(int(np.mean(scores[-monitor_training:]))) + '.pt'
+            model_name = 'model_' + date + '_' + str(int(np.mean(scores[-100:]))) + '.pt'
             torch.save(self.online_net.state_dict(), MODEL_PATH + model_name)
 
         # Close env
@@ -800,7 +798,7 @@ class DQNAgent:
                 done = terminated or truncated
                 step += 1
                 if done:
-                    if step >= 20:
+                    if step >= TIMESTEPS_LIMIT:
                         num_lost += 1
                     elif step == 1 and reward >= 150.0:
                         num_one_hop_perfect += 1

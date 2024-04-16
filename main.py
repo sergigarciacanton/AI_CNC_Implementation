@@ -10,15 +10,15 @@ while ENV.ready is False:
 
 agent = DQNAgent(
     env=ENV,
-    replay_buffer_size=100000,
-    batch_size=25,
+    replay_buffer_size=1000000,
+    batch_size=4,
     target_update=400,
-    epsilon_decay=1 / 150000,
+    epsilon_decay=1 / 25000,
     seed=None,
     max_epsilon=1.0,
-    min_epsilon=0.001,
-    gamma=0.85,
-    learning_rate=0.0001,
+    min_epsilon=0.0,
+    gamma=0.99,
+    learning_rate=0.001,
     tau=0.85
 )
 
@@ -34,12 +34,12 @@ while True:
 
 if option == 0:
     print('[I] Chose training model')
-    agent.train(max_steps=300000, monitor_training=10000, plotting_interval=50000)
+    agent.train(max_steps=100000, monitor_training=10000, plotting_interval=20000)
 
 elif option == 1:
     print('[I] Chose evaluating best model')
     agent.load_model()
-    agent.evaluate(ENV, 10)
+    agent.evaluate(ENV, 100)
 
 elif option == 2:
     print('[I] Chose evaluating custom model')

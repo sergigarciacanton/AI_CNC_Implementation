@@ -75,7 +75,8 @@ class EnvironmentTSN(gym.Env):
 
             # Hyperperiod setting. Use maximum period of a given set (see config.py)
             # self.hyperperiod = math.lcm(*[self.vnf_list[i]['period'] for i in range(len(self.vnf_list))])
-            self.hyperperiod = max(VNF_PERIOD)
+            # self.hyperperiod = max(VNF_PERIOD)
+            self.hyperperiod = 16
 
             # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
             for edge in range(len(TRAINING_EDGES)):
@@ -91,12 +92,12 @@ class EnvironmentTSN(gym.Env):
         self.logger.info('[I] Environment ready to operate')
 
         # Observation space
-        num_obs_features = 7 + ((self.hyperperiod * DIVISION_FACTOR + 2) * len(TRAINING_EDGES))  # Num of obs features
+        num_obs_features = 7 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
         # self.observation_space = MultiDiscrete(np.array([1] * num_obs_features), dtype=np.int32)
         self.observation_space = Discrete(num_obs_features)
 
         # Action space
-        self.action_space = Discrete(len(TRAINING_EDGES) * max(VNF_PERIOD) * DIVISION_FACTOR + 1)
+        self.action_space = Discrete(len(TRAINING_EDGES) * self.hyperperiod * DIVISION_FACTOR + 1)
 
     # Subscription function to RabbitMQ channels (executed at a thread). Called during init if not training
     def rabbitmq_subscribe(self, conn, key_string):
@@ -265,25 +266,31 @@ class EnvironmentTSN(gym.Env):
 
         # Iterate along all edges for extracting its state
         for edge_id, edge in self.edges_info.items():
-            # if edge['source'] == self.current_node:
-            st[edge_id] = [0, 0]  # [dist, cong]
+            if edge['source'] == self.current_node:
+                # st[edge_id] = [0, 0]  # [dist, cong]
+                #
+                # # Compute distance to destination [0]
+                # # Distance is calculated as the length of the shortest path between
+                # #     the destination node of the edge and the destination node of the stream
+                # st[edge_id][0] = nx.shortest_path_length(self.graph, source=edge['destination'],
+                #                                          target=self.current_vnf['destination'])
+                #
+                # # Compute edge traffic load [1]. Calculated as the average load of all slots
+                # st[edge_id][1] = int(100 * sum(i for i in list(edge['schedule']))
+                #                      / (SLOT_CAPACITY * self.hyperperiod * DIVISION_FACTOR))
 
-            # Compute distance to destination [0]
-            # Distance is calculated as the length of the shortest path between
-            #     the destination node of the edge and the destination node of the stream
-            st[edge_id][0] = nx.shortest_path_length(self.graph, source=edge['destination'],
-                                                     target=self.current_vnf['destination'])
-
-            # Compute edge traffic load [1]. Calculated as the average load of all slots
-            st[edge_id][1] = int(100 * sum(i for i in list(edge['schedule']))
-                                 / (SLOT_CAPACITY * self.hyperperiod * DIVISION_FACTOR))
-
-            # Compute position traffic loads. Minimum percentage of free bytes for all slots of each position
-            slot_loads = [0] * self.hyperperiod * DIVISION_FACTOR
-            for c in range(self.current_vnf['period']):
-                free_bytes = self.get_position_availability(edge['schedule'], c, self.current_vnf['period'])
-                slot_loads[c] = int(100 * free_bytes / SLOT_CAPACITY)
-            st[edge_id] += slot_loads
+                # Compute position traffic loads. Minimum percentage of free bytes for all slots of each position
+                slot_loads = [0] * self.hyperperiod * DIVISION_FACTOR
+                if len(self.route) < 2:
+                    for c in range(self.current_vnf['period']):
+                        free_bytes = self.get_position_availability(edge['schedule'], c, self.current_vnf['period'])
+                        slot_loads[c] = int(100 * free_bytes / SLOT_CAPACITY)
+                elif edge['destination'] != self.route[-2]:
+                    for c in range(self.current_vnf['period']):
+                        free_bytes = self.get_position_availability(edge['schedule'], c, self.current_vnf['period'])
+                        slot_loads[c] = int(100 * free_bytes / SLOT_CAPACITY)
+                # st[edge_id] += slot_loads
+                st[edge_id] = slot_loads
 
         # Process VNF. Pop actions and convert length to percentage of slot capacity
         vnf = list(self.current_vnf.values())[:-1]
@@ -348,13 +355,13 @@ class EnvironmentTSN(gym.Env):
             # print(self.reward)
             # print()
 
-            pre_len = nx.shortest_path_length(self.graph, source=self.route[-2], target=self.current_vnf['destination'])
+            # pre_len = nx.shortest_path_length(self.graph, source=self.route[-2], target=self.current_vnf['destination'])
             cur_len = nx.shortest_path_length(self.graph, source=self.current_node,
                                               target=self.current_vnf['destination'])
 
             self.reward -= cur_len
-            if pre_len - 1 != cur_len:
-                self.reward -= 10
+            # if pre_len - 1 != cur_len:
+            #     self.reward -= 10
             # print(self.reward)
             # print(pre_len)
             # print(cur_len)
@@ -370,15 +377,27 @@ class EnvironmentTSN(gym.Env):
             # If the stream has reached the destination, increase by 50 the reward
             if self.current_node == self.current_vnf['destination']:
                 # self.reward += 50
-                # If scheduling was optimal (selected shortest path and best positions) increase reward by 100
+                # If scheduling was optimal (selected shortest path and best positions) increase reward by 300
                 if self.route in list(nx.all_shortest_paths(self.graph,
                                                             self.current_vnf['source'],
                                                             self.current_vnf['destination'])) \
                         and self.optimal_positions is True:
                     self.reward += 300
-            # In the rest of cases, it means that the last action could not be scheduled. Decrease by 100 the reward
-            else:
-                self.reward -= 100
+                elif self.route in list(nx.all_shortest_paths(self.graph,
+                                                              self.current_vnf['source'],
+                                                              self.current_vnf['destination'])) \
+                        and self.optimal_positions is False:
+                    self.reward += 50
+                elif self.route not in list(nx.all_shortest_paths(self.graph,
+                                                                  self.current_vnf['source'],
+                                                                  self.current_vnf['destination'])) \
+                        and self.optimal_positions is True:
+                    self.reward += 150
+                elif self.route not in list(nx.all_shortest_paths(self.graph,
+                                                                  self.current_vnf['source'],
+                                                                  self.current_vnf['destination'])) \
+                        and self.optimal_positions is False:
+                    self.reward = 0
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward
         if self.current_delay > self.current_vnf['max_delay']:
             self.terminated = True
@@ -427,15 +446,9 @@ class EnvironmentTSN(gym.Env):
         info = {'previous_node': -1}
         if ENV_LOG_LEVEL == 10:
             self.logger.debug('[D] RESET. info = ' + str(info) + ', obs = ' + str(obs[0:7]))
-            for i in range(24):
-                self.logger.debug('[D] RESET. Edge ' + str(i) + ' | dist: ' +
-                                  str(obs[7 + (i * (
-                                          self.hyperperiod * DIVISION_FACTOR + 2))]) + ', edge availability: ' +
-                                  str(obs[8 + (i * (
-                                          self.hyperperiod * DIVISION_FACTOR + 2))]) + ', position availabilities: ' +
-                                  str(obs[9 + (i * (self.hyperperiod * DIVISION_FACTOR + 2)):7 +
-                                                                                             ((i + 1) * (
-                                                                                                         self.hyperperiod * DIVISION_FACTOR + 2))]))
+            for i in range(3):
+                self.logger.debug('[D] RESET. Edge ' + str(i) + ' |  position availabilities: ' +
+                                  str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + ((i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         return obs, info
 
     def step(self, action_int):
@@ -485,15 +498,9 @@ class EnvironmentTSN(gym.Env):
                               ', truncated = ' + str(truncated) +
                               ', reward = ' + str(self.reward) +
                               ', obs = ' + str(obs[0:7]))
-            for i in range(24):
-                self.logger.debug('[D] STEP. Edge ' + str(i) + ' | dist: ' +
-                                  str(obs[7 + (i * (
-                                          self.hyperperiod * DIVISION_FACTOR + 2))]) + ', edge availability: ' +
-                                  str(obs[8 + (i * (
-                                          self.hyperperiod * DIVISION_FACTOR + 2))]) + ', position availabilities: ' +
-                                  str(obs[9 + (i * (self.hyperperiod * DIVISION_FACTOR + 2)):7 +
-                                                                                             ((i + 1) * (
-                                                                                                         self.hyperperiod * DIVISION_FACTOR + 2))]))
+            for i in range(3):
+                self.logger.debug('[D] STEP. Edge ' + str(i) + ' |  position availabilities: ' +
+                                  str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + ((i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         if self.terminated:
             self.logger.info('[I] Ending episode...\n')
         return obs, self.reward, self.terminated, truncated, info
