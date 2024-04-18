@@ -662,9 +662,11 @@ class DQNAgent:
         mean_losses = []
         scores = []
         mean_scores = []
+        max_score = -99999
         update_cnt = 0
         episodes_count = 0
         step = 0
+        model_name = None
 
         # Start training
         try:
@@ -725,7 +727,14 @@ class DQNAgent:
                 # if update_cnt % evaluation_interval == 0:
                 #     result_df.append(self.evaluate(copy.deepcopy(self.env)))
         except KeyboardInterrupt:
-            pass
+            self.logger.info(f"[I] Step: {step} | "
+                             f"Rewards: {round(np.mean(scores[-100:]), 3)} | "
+                             f"Loss: {round(np.mean(losses[-100:]), 3)} | "
+                             f"Epsilons: {round(np.mean(epsilons[-100:]), 3)} | "
+                             f"Episodes: {episodes_count}")
+            if episodes_count > 1000:
+                self._plot(step, max_steps, scores, mean_scores, losses, mean_losses, epsilons)
+                plt.close()
 
         end = time.time()
 
@@ -798,7 +807,7 @@ class DQNAgent:
                 done = terminated or truncated
                 step += 1
                 if done:
-                    if step >= TIMESTEPS_LIMIT:
+                    if step > TIMESTEPS_LIMIT:
                         num_lost += 1
                     elif step == 1 and reward >= 150.0:
                         num_one_hop_perfect += 1

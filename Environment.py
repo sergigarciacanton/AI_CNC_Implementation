@@ -69,7 +69,9 @@ class EnvironmentTSN(gym.Env):
             self.logger.info('[I] Training enabled. Reading topology from config...')
             # Generate graph adding given topology (see config.py)
             self.graph.add_nodes_from(TRAINING_NODES)
-            self.graph.add_edges_from(TRAINING_EDGES)
+            for edge, data in TRAINING_EDGES.items():
+                source, target = edge
+                self.graph.add_edge(source, target, weight=data['delay'])
             self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
                              + str(self.graph.number_of_edges()) + ' edges')
 
@@ -79,9 +81,12 @@ class EnvironmentTSN(gym.Env):
             self.hyperperiod = 16
 
             # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
-            for edge in range(len(TRAINING_EDGES)):
-                self.edges_info[edge] = dict(source=TRAINING_EDGES[edge][0], destination=TRAINING_EDGES[edge][1],
-                                             schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR, delay=10)
+            id_edge = 0
+            for edge, delay in TRAINING_EDGES.items():
+                self.edges_info[id_edge] = dict(source=edge[0], destination=edge[1],
+                                                schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
+                                                delay=delay['delay'])
+                id_edge += 1
 
             # Ready to work. Observation and action spaces can now be defined
             self.ready = True
@@ -356,7 +361,7 @@ class EnvironmentTSN(gym.Env):
             # print()
 
             # pre_len = nx.shortest_path_length(self.graph, source=self.route[-2], target=self.current_vnf['destination'])
-            cur_len = nx.shortest_path_length(self.graph, source=self.current_node,
+            cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
                                               target=self.current_vnf['destination'])
 
             self.reward -= cur_len
@@ -378,24 +383,24 @@ class EnvironmentTSN(gym.Env):
             if self.current_node == self.current_vnf['destination']:
                 # self.reward += 50
                 # If scheduling was optimal (selected shortest path and best positions) increase reward by 300
-                if self.route in list(nx.all_shortest_paths(self.graph,
-                                                            self.current_vnf['source'],
-                                                            self.current_vnf['destination'])) \
+                if self.current_delay == nx.dijkstra_path_length(self.graph,
+                                                                 self.current_vnf['source'],
+                                                                 self.current_vnf['destination']) \
                         and self.optimal_positions is True:
                     self.reward += 300
-                elif self.route in list(nx.all_shortest_paths(self.graph,
-                                                              self.current_vnf['source'],
-                                                              self.current_vnf['destination'])) \
+                elif self.current_delay == nx.dijkstra_path_length(self.graph,
+                                                                   self.current_vnf['source'],
+                                                                   self.current_vnf['destination']) \
                         and self.optimal_positions is False:
                     self.reward += 50
-                elif self.route not in list(nx.all_shortest_paths(self.graph,
+                elif self.current_delay > nx.dijkstra_path_length(self.graph,
                                                                   self.current_vnf['source'],
-                                                                  self.current_vnf['destination'])) \
+                                                                  self.current_vnf['destination']) \
                         and self.optimal_positions is True:
                     self.reward += 150
-                elif self.route not in list(nx.all_shortest_paths(self.graph,
+                elif self.current_delay > nx.dijkstra_path_length(self.graph,
                                                                   self.current_vnf['source'],
-                                                                  self.current_vnf['destination'])) \
+                                                                  self.current_vnf['destination']) \
                         and self.optimal_positions is False:
                     self.reward = 0
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward

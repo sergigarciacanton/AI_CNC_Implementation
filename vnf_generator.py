@@ -7,8 +7,8 @@ if SEED is not None:
 
 class VNF:
     def __init__(self, graph_nodes):
-        self.source, self.target = random.sample(graph_nodes, k=2)  # Source and destination of stream
-        # self.source, self.target = 0, 7  # Source and destination of stream
+        # self.source, self.target = random.sample(graph_nodes, k=2)  # Source and destination of stream
+        self.source, self.target = 0, 7  # Source and destination of stream
         self.length = random.choice(VNF_LENGTH)  # Length of packets to send [bytes]
         self.period = random.choice(VNF_PERIOD)  # Periodicity of sent packets [ms]
         self.max_delay = random.choice(VNF_DELAY)  # Maximum acceptable delay [ms]

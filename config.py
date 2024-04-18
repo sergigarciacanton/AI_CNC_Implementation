@@ -17,14 +17,37 @@ SLOT_CAPACITY = 12500  # Number of bytes that can be transmitted at each time sl
 DIVISION_FACTOR = 1  # Number of slots to define per millisecond
 
 # Background traffic settings
-BACKGROUND_STREAMS = 50  # Number of streams to create as background traffic. Their scheduling is prefixed
+BACKGROUND_STREAMS = 100  # Number of streams to create as background traffic. Their scheduling is prefixed
 
 # Training settings
 TRAINING_IF = True  # Toggle training mode. When training, VNFs are random and topology is given in this section
 TRAINING_NODES = [0, 1, 2, 3, 4, 5, 6, 7]  # List of nodes in the training net
-TRAINING_EDGES = [(0, 1), (1, 0), (1, 3), (3, 1), (3, 2), (2, 3), (2, 0), (0, 2),
-                  (0, 4), (4, 0), (1, 5), (5, 1), (3, 7), (7, 3), (2, 6), (6, 2),
-                  (4, 5), (5, 4), (5, 7), (7, 5), (7, 6), (6, 7), (6, 4), (4, 6)]  # List of edges in the training net
+TRAINING_EDGES = {
+    (0, 1): {'delay': 10},
+    (1, 0): {'delay': 10},
+    (1, 3): {'delay': 20},
+    (3, 1): {'delay': 20},
+    (3, 2): {'delay': 30},
+    (2, 3): {'delay': 30},
+    (2, 0): {'delay': 40},
+    (0, 2): {'delay': 40},
+    (0, 4): {'delay': 30},
+    (4, 0): {'delay': 30},
+    (1, 5): {'delay': 50},
+    (5, 1): {'delay': 50},
+    (3, 7): {'delay': 70},
+    (7, 3): {'delay': 70},
+    (2, 6): {'delay': 10},
+    (6, 2): {'delay': 10},
+    (4, 5): {'delay': 40},
+    (5, 4): {'delay': 40},
+    (5, 7): {'delay': 10},
+    (7, 5): {'delay': 10},
+    (7, 6): {'delay': 20},
+    (6, 7): {'delay': 20},
+    (6, 4): {'delay': 30},
+    (4, 6): {'delay': 30},
+}
 
 # VNF generator settings
 VNF_LENGTH = [64, 128, 256, 512, 1024, 1500]  # List of the possible lengths of packets to generate in random VNFs
