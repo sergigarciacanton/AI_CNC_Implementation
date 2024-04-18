@@ -400,9 +400,9 @@ class EnvironmentTSN(gym.Env):
                     self.reward = 0
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward
         if self.current_delay > self.current_vnf['max_delay']:
+            self.logger.warning(f"Maximum delay exceeded! {self.current_delay} -- {self.current_vnf['max_delay']}")
             self.terminated = True
             self.reward -= 100
-            self.logger.info('[I] Maximum delay exceeded!')
         return
 
     def reset(self, seed=None):
@@ -448,7 +448,8 @@ class EnvironmentTSN(gym.Env):
             self.logger.debug('[D] RESET. info = ' + str(info) + ', obs = ' + str(obs[0:7]))
             for i in range(3):
                 self.logger.debug('[D] RESET. Edge ' + str(i) + ' |  position availabilities: ' +
-                                  str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + ((i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
+                                  str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + (
+                                              (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         return obs, info
 
     def step(self, action_int):
@@ -500,7 +501,8 @@ class EnvironmentTSN(gym.Env):
                               ', obs = ' + str(obs[0:7]))
             for i in range(3):
                 self.logger.debug('[D] STEP. Edge ' + str(i) + ' |  position availabilities: ' +
-                                  str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + ((i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
+                                  str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + (
+                                              (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         if self.terminated:
             self.logger.info('[I] Ending episode...\n')
         return obs, self.reward, self.terminated, truncated, info
