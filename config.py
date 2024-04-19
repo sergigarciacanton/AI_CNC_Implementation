@@ -17,7 +17,7 @@ SLOT_CAPACITY = 12500  # Number of bytes that can be transmitted at each time sl
 DIVISION_FACTOR = 1  # Number of slots to define per millisecond
 
 # Background traffic settings
-BACKGROUND_STREAMS = 100  # Number of streams to create as background traffic. Their scheduling is prefixed
+BACKGROUND_STREAMS = 500  # Number of streams to create as background traffic. Their scheduling is prefixed
 
 # Training settings
 TRAINING_IF = True  # Toggle training mode. When training, VNFs are random and topology is given in this section

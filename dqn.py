@@ -12,7 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
-from config import MODEL_PATH, SEED, VNF_PERIOD, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
+from config import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
     PLOTS_PATH, SAVE_PLOTS, TIMESTEPS_LIMIT
 import os
 import logging
@@ -662,11 +662,9 @@ class DQNAgent:
         mean_losses = []
         scores = []
         mean_scores = []
-        max_score = -99999
         update_cnt = 0
         episodes_count = 0
         step = 0
-        model_name = None
 
         # Start training
         try:

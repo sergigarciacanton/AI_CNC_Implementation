@@ -432,7 +432,7 @@ class EnvironmentTSN(gym.Env):
         # If it is training, a random VNF has to be generated
         if TRAINING_IF is True:
             # Generate a random VNF
-            self.current_vnf = VNF(list(self.graph.nodes)).get_request()
+            self.current_vnf = VNF(None).get_request()
         else:
             # Set the first VNF as the one to process
             self.current_vnf = self.vnf_list[self.vnf_id]

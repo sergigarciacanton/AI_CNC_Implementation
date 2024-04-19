@@ -11,8 +11,8 @@ while ENV.ready is False:
 agent = DQNAgent(
     env=ENV,
     replay_buffer_size=1000000,
-    batch_size=8,
-    target_update=1000,
+    batch_size=6,
+    target_update=400,
     epsilon_decay=1 / 80000,
     seed=None,
     max_epsilon=1.0,
