@@ -1,8 +1,8 @@
 # Logging settings
 ENV_LOG_LEVEL = 40  # Levels: DEBUG 10 | INFO 20 | WARN 30 | ERROR 40 | CRITICAL 50
-ENV_LOG_FILE_NAME = 'logs/env.log'  # Name of file where to store all env generated logs. Make sure the directory exists
+ENV_LOG_FILE_NAME = 'logs/env'  # Name of file where to store all env generated logs. Make sure the directory exists
 DQN_LOG_LEVEL = 20  # Levels: DEBUG 10 | INFO 20 | WARN 30 | ERROR 40 | CRITICAL 50
-DQN_LOG_FILE_NAME = 'logs/dqn.log'  # Name of file where to store all DQN generated logs. Make sure the directory exists
+DQN_LOG_FILE_NAME = 'logs/dqn'  # Name of file where to store all DQN generated logs. Make sure the directory exists
 
 # Rabbitmq settings
 RABBITMQ_HOST = 'rabbitmq-microservice'  # Host of RabbitMQ server
@@ -17,7 +17,7 @@ SLOT_CAPACITY = 12500  # Number of bytes that can be transmitted at each time sl
 DIVISION_FACTOR = 1  # Number of slots to define per millisecond
 
 # Background traffic settings
-BACKGROUND_STREAMS = 500  # Number of streams to create as background traffic. Their scheduling is prefixed
+BACKGROUND_STREAMS = 300  # 750  # Number of streams to create as background traffic. Their scheduling is prefixed
 
 # Training settings
 TRAINING_IF = True  # Toggle training mode. When training, VNFs are random and topology is given in this section
@@ -50,9 +50,9 @@ TRAINING_EDGES = {
 }
 
 # VNF generator settings
-VNF_LENGTH = [64, 128, 256, 512, 1024, 1500]  # List of the possible lengths of packets to generate in random VNFs
+VNF_LENGTH = [1500]  # List of the possible lengths of packets to generate in random VNFs
 VNF_DELAY = [70, 100, 130, 160]  # List of possible delay bounds to generate in random VNFs
-VNF_PERIOD = [1, 2, 4, 8, 16]  # , 32, 64  # List of possible periods to generate in random VNFs
+VNF_PERIOD = [4]  # List of possible periods to generate in random VNFs
 #                                          Must ALWAYS be set (maximum value is used as hyperperiod)
 
 # Agent settings

@@ -19,7 +19,7 @@ from config import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, RABBITMQ_HOST, RABBITMQ_POR
 
 class EnvironmentTSN(gym.Env):
     # Environment initialization
-    def __init__(self):
+    def __init__(self, log_file_id):
         self.graph = nx.DiGraph()  # Graph containing the network topology. Training topology is given at config.py
         self.ip_addresses = {}  # Dict containing the IP addresses of all nodes in the network. Not used if training
         self.vnf_list = {}  # Dict of current VNFs generated for real streams and their states
@@ -40,7 +40,7 @@ class EnvironmentTSN(gym.Env):
         # Logging settings
         self.logger = logging.getLogger('env')
         self.logger.setLevel(ENV_LOG_LEVEL)
-        self.logger.addHandler(logging.FileHandler(ENV_LOG_FILE_NAME, mode='w', encoding='utf-8'))
+        self.logger.addHandler(logging.FileHandler(ENV_LOG_FILE_NAME + log_file_id + '.log', mode='w', encoding='utf-8'))
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
         self.logger.addHandler(stream_handler)
@@ -76,9 +76,7 @@ class EnvironmentTSN(gym.Env):
                              + str(self.graph.number_of_edges()) + ' edges')
 
             # Hyperperiod setting. Use maximum period of a given set (see config.py)
-            # self.hyperperiod = math.lcm(*[self.vnf_list[i]['period'] for i in range(len(self.vnf_list))])
-            # self.hyperperiod = max(VNF_PERIOD)
-            self.hyperperiod = 16
+            self.hyperperiod = 16  # max(VNF_PERIOD)
 
             # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
             id_edge = 0
@@ -187,6 +185,7 @@ class EnvironmentTSN(gym.Env):
     # Background traffic generator. Called during reset
     def generate_background_traffic(self):
         # Iterate until having created all desired background streams (see config.py)
+        num_abortions = 0
         for i in range(BACKGROUND_STREAMS):
             # Create random VNF (see vnf_generator.py) and get the route that will follow (shortest path)
             # VNF = {source, destination, length, period, max_delay, actions}
@@ -201,42 +200,27 @@ class EnvironmentTSN(gym.Env):
                 for edge_id, edge in self.edges_info.items():
                     # If edge has the desired source and destination, schedule resources and go to next hop
                     if edge['source'] == path[j] and edge['destination'] == path[j + 1]:
-                        # Infinite loop in order to make sure the stream is scheduled
-                        num_retries = 0
-                        while True:
-                            # Choose random position with probability i/BACKGROUND_STREAMS
-                            # Choose position with higher availability with probability 1 - (i/BACKGROUND_STREAMS)
-                            if random.randrange(BACKGROUND_STREAMS) > int(100 * i / BACKGROUND_STREAMS):
-                                # action = (e, t)  e = edge ID  t = position ID
-                                action = (edge_id, random.randrange(int(self.hyperperiod * DIVISION_FACTOR /
-                                                                        self.background_traffic[i]['period'])))
-                            else:
-                                # Search for the position with higher capacity
-                                time_slot = 0
-                                max_capacity = 0
-                                for slot in range(self.background_traffic[i]['period']):
-                                    capacity = self.get_position_availability(edge['schedule'],
-                                                                              slot,
-                                                                              self.background_traffic[i]['period'])
-                                    if capacity > max_capacity:
-                                        max_capacity = capacity
-                                        time_slot = slot
+                        # Choose best position of the edge (the one with the highest minimum availability)
+                        # action = (e, t)  e = edge ID  t = position ID
+                        position_availabilities = self.get_edge_positions(edge_id)
+                        position = position_availabilities.index(max(position_availabilities))
+                        action = (edge_id, position)
 
-                                # action = (e, t)  e = edge ID  t = position ID
-                                action = (edge_id, time_slot)
-
-                            # Schedule action
-                            # If action is done (return True), pass to next hop
-                            # If action is impossible, create new VNF and try to schedule it. If looping too much, stop
-                            if self.schedule_background_stream(action, i):
-                                break
-                            else:
-                                num_retries += 1
+                        # Schedule action
+                        # If action is done (return True), pass to next hop
+                        # If action is impossible, create new VNF and try to schedule it. If looping too much, stop
+                        if self.schedule_background_stream(action, i):
+                            break
+                        else:
+                            num_abortions += 1
+                            i -= 1
+                            if num_abortions >= 1000:
                                 # If looping too much, network has collapsed. Stop execution
-                                if num_retries >= 1000:
-                                    self.logger.warning('[!] Background traffic could not be allocated! Ask for less '
-                                                        'background streams (see config.py --> BACKGROUND_STREAMS)')
-                                    return
+                                self.logger.warning(
+                                    '[!] Background traffic could not be allocated! Ask for less '
+                                    'background streams (see config.py --> BACKGROUND_STREAMS)')
+                                return
+                            break
                         break
 
     # Allocate resources for a background stream. Called during generate_background_traffic
@@ -254,7 +238,7 @@ class EnvironmentTSN(gym.Env):
                 self.edges_info[action[0]]['schedule'][time_slot] -= self.background_traffic[stream_id]['length']
                 time_slot += self.background_traffic[stream_id]['period']
 
-            # Add action to the actions list of the stram info
+            # Add action to the actions list of the stream info
             self.background_traffic[stream_id]['actions'].append(action)
             return True
         else:
@@ -269,21 +253,10 @@ class EnvironmentTSN(gym.Env):
         # First build observation as a dictionary
         st = {}
 
-        # Iterate along all edges for extracting its state
+        # Iterate along all edges
         for edge_id, edge in self.edges_info.items():
+            # Extract just the state of the edges whose source is the current node
             if edge['source'] == self.current_node:
-                # st[edge_id] = [0, 0]  # [dist, cong]
-                #
-                # # Compute distance to destination [0]
-                # # Distance is calculated as the length of the shortest path between
-                # #     the destination node of the edge and the destination node of the stream
-                # st[edge_id][0] = nx.shortest_path_length(self.graph, source=edge['destination'],
-                #                                          target=self.current_vnf['destination'])
-                #
-                # # Compute edge traffic load [1]. Calculated as the average load of all slots
-                # st[edge_id][1] = int(100 * sum(i for i in list(edge['schedule']))
-                #                      / (SLOT_CAPACITY * self.hyperperiod * DIVISION_FACTOR))
-
                 # Compute position traffic loads. Minimum percentage of free bytes for all slots of each position
                 slot_loads = [0] * self.hyperperiod * DIVISION_FACTOR
                 if len(self.route) < 2:
@@ -294,7 +267,6 @@ class EnvironmentTSN(gym.Env):
                     for c in range(self.current_vnf['period']):
                         free_bytes = self.get_position_availability(edge['schedule'], c, self.current_vnf['period'])
                         slot_loads[c] = int(100 * free_bytes / SLOT_CAPACITY)
-                # st[edge_id] += slot_loads
                 st[edge_id] = slot_loads
 
         # Process VNF. Pop actions and convert length to percentage of slot capacity
@@ -328,6 +300,16 @@ class EnvironmentTSN(gym.Env):
             self.terminated = True
             self.logger.info('[I] Could not schedule the action!')
 
+    # Returns an array which contains the availability (in percentage) of all positions of the specified edge
+    # Called during generate_background_traffic and reward_function
+    def get_edge_positions(self, edge_id):
+        position_availabilities = [0] * self.current_vnf['period'] * DIVISION_FACTOR
+        for c in range(self.current_vnf['period'] * DIVISION_FACTOR):
+            free_bytes = self.get_position_availability(self.edges_info[edge_id]['schedule'], c,
+                                                        self.current_vnf['period'])
+            position_availabilities[c] = int(100 * free_bytes / SLOT_CAPACITY)
+        return position_availabilities
+
     # Finds the availability of a position, which is the minimum availability of the slots of that position
     # Called during generate_background_traffic, schedule_background_stream and schedule_stream
     # Returns the availability of a given position for a given period
@@ -344,71 +326,67 @@ class EnvironmentTSN(gym.Env):
     def reward_function(self, action):
         if action[0] < len(self.edges_info):
             # Compute availabilities of all positions
-            position_availabilities = [0] * self.current_vnf['period'] * DIVISION_FACTOR
-            for c in range(self.current_vnf['period'] * DIVISION_FACTOR):
-                free_bytes = self.get_position_availability(self.edges_info[action[0]]['schedule'], c,
-                                                            self.current_vnf['period'])
-                position_availabilities[c] = int(100 * free_bytes / SLOT_CAPACITY)
+            position_availabilities = self.get_edge_positions(action[0])
 
             # Not take into account the load of the current VNF
             position_availabilities[action[1]] += int(100 * self.current_vnf['length'] / SLOT_CAPACITY)
 
-            self.reward += 0.1 * (position_availabilities[action[1]] - max(position_availabilities))
-            # print(position_availabilities)
-            # print(max(position_availabilities))
-            # print(position_availabilities[action[1]])
-            # print(self.reward)
-            # print()
+            # Decrease the reward if scheduling was not optimal (not selected the best position)
+            # self.reward += 0.1 * (position_availabilities[action[1]] - max(position_availabilities))
 
-            # pre_len = nx.shortest_path_length(self.graph, source=self.route[-2], target=self.current_vnf['destination'])
+            # Decrease the reward by the distance from the current node to the target node (in delay terms)
             cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
                                               target=self.current_vnf['destination'])
-
             self.reward -= cur_len
-            # if pre_len - 1 != cur_len:
-            #     self.reward -= 10
-            # print(self.reward)
-            # print(pre_len)
-            # print(cur_len)
-            # print(self.reward)
-            # print()
 
             # If the agent did not choose the position with more availability, mark as non-optimal
             if max(position_availabilities) != position_availabilities[action[1]]:
                 self.optimal_positions = False
+                self.terminated = True
+                self.reward -= 100
+                return -2
 
         # If the episode is ended, check why
         if self.terminated:
-            # If the stream has reached the destination, increase by 50 the reward
+            # If the stream has reached the destination, check how
             if self.current_node == self.current_vnf['destination']:
-                # self.reward += 50
-                # If scheduling was optimal (selected shortest path and best positions) increase reward by 300
+                # If routing and scheduling were optimal (shortest path and best positions) increase reward by 300
                 if self.current_delay == nx.dijkstra_path_length(self.graph,
                                                                  self.current_vnf['source'],
                                                                  self.current_vnf['destination']) \
-                        and self.optimal_positions is True:
+                        and self.optimal_positions is True \
+                        and self.current_delay <= self.current_vnf['max_delay']:
                     self.reward += 300
-                elif self.current_delay == nx.dijkstra_path_length(self.graph,
-                                                                   self.current_vnf['source'],
-                                                                   self.current_vnf['destination']) \
-                        and self.optimal_positions is False:
-                    self.reward += 50
-                elif self.current_delay > nx.dijkstra_path_length(self.graph,
-                                                                  self.current_vnf['source'],
-                                                                  self.current_vnf['destination']) \
+                    return 0
+                # If just routing was optimal increase reward by 50
+                # elif self.current_delay == nx.dijkstra_path_length(self.graph,
+                #                                                    self.current_vnf['source'],
+                #                                                    self.current_vnf['destination']) \
+                #         and self.optimal_positions is False \
+                #         and self.current_delay <= self.current_vnf['max_delay']:
+                #     self.reward += 50
+                # If just scheduling was optimal increase reward by 150
+                elif nx.dijkstra_path_length(self.graph,
+                                             self.current_vnf['source'],
+                                             self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                    'max_delay'] \
                         and self.optimal_positions is True:
                     self.reward += 150
-                elif self.current_delay > nx.dijkstra_path_length(self.graph,
-                                                                  self.current_vnf['source'],
-                                                                  self.current_vnf['destination']) \
-                        and self.optimal_positions is False:
-                    self.reward = 0
+                    return 1
+                # If neither routing nor scheduling were optimal leave the reward as 0
+                # elif nx.dijkstra_path_length(self.graph,
+                #                              self.current_vnf['source'],
+                #                              self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                #     'max_delay'] \
+                #         and self.optimal_positions is False:
+                #     self.reward = 0
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward
         if self.current_delay > self.current_vnf['max_delay']:
             self.logger.warning(f"Maximum delay exceeded! {self.current_delay} -- {self.current_vnf['max_delay']}")
             self.terminated = True
             self.reward -= 100
-        return
+            return -1
+        return None
 
     def reset(self, seed=None):
         super().reset(seed=seed)
@@ -465,11 +443,15 @@ class EnvironmentTSN(gym.Env):
 
         # Subtract 1 to the remaining time steps
         self.remaining_timesteps -= 1
+        # Truncate episode in case it is becoming too large (maybe due to network loops)
+        truncated = self.remaining_timesteps < 0
 
         if action[0] >= len(self.edges_info):
             self.terminated = True
 
-            info = {'previous_node': -1}
+            info = {'previous_node': -1, 'exit_code': -3}
+        elif truncated:
+            info = {'previous_node': -1, 'exit_code': -4}
         else:
             # Try to schedule the stream given the action to perform
             self.schedule_stream(action)
@@ -484,13 +466,12 @@ class EnvironmentTSN(gym.Env):
                     self.terminated = True
                     self.logger.info('[I] Reached destination!')
 
-            info = {'previous_node': self.route[-2]}
-
             # Update reward of current episode
-            self.reward_function(action)
-
-        # Truncate episode in case it is becoming too large (maybe due to network loops)
-        truncated = self.remaining_timesteps <= 0
+            exit_code = self.reward_function(action)
+            if exit_code is None:
+                info = {'previous_node': self.route[-2]}
+            else:
+                info = {'previous_node': self.route[-2], 'exit_code': exit_code}
 
         # Acquire data to return to the agent
         obs = self.get_observation()
