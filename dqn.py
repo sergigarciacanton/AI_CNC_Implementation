@@ -782,24 +782,16 @@ class DQNAgent:
         num_lost = 0
         num_no_resources = 0
         num_delayed = 0
-        num_bad_schedule = 0
-        # num_one_hop_perfect = 0
-        # num_one_hop_arrived_w_errors_now = 0
-        num_two_hop_perfect = 0
-        num_two_hop_arrived_w_errors = 0
-        # num_two_hop_arrived_w_errors_before = 0
-        # num_two_hop_arrived_w_errors_now = 0
-        # num_three_hop_perfect = 0
-        # num_three_hop_arrived_w_errors = 0
-        # num_three_hop_arrived_w_errors_before = 0
-        # num_three_hop_arrived_w_errors_now = 0
-        # num_arrived_wo_routing = 0
-        num_arrived_w_errors = 0
+        # num_bad_schedule = 0
+        num_arrived = 0
+        num_arrived_wo_scheduling = 0
+        num_perfect = 0
+        num_arrived_wo_routing = 0
+        num_error_cases = 0
 
         for episode in range(n_episodes):
             obs, info = eval_env.reset()
             done = False
-            # previous_reward = 0
             step = 0
             reward = 0
 
@@ -813,49 +805,23 @@ class DQNAgent:
                 if done:
                     exit_code = info['exit_code']
                     if exit_code == 0:
-                        num_two_hop_perfect += 1
+                        num_perfect += 1
                     elif exit_code == 1:
-                        num_two_hop_arrived_w_errors += 1
+                        num_arrived_wo_routing += 1
+                    elif exit_code == 2:
+                        num_arrived_wo_scheduling += 1
+                    elif exit_code == 3:
+                        num_arrived += 1
                     elif exit_code == -1:
                         num_delayed += 1
-                    elif exit_code == -2:
-                        num_bad_schedule += 1
+                    # elif exit_code == -2:
+                    #     num_bad_schedule += 1
                     elif exit_code == -3:
                         num_no_resources += 1
                     elif exit_code == -4:
                         num_lost += 1
                     else:
-                        num_arrived_w_errors += 1
-                    # if step >= TIMESTEPS_LIMIT:
-                    #     num_lost += 1
-                    # elif action == 384:
-                    #     num_no_resources += 1
-                    # elif step == 1 and reward >= 150.0:
-                    #     num_one_hop_perfect += 1
-                    # elif step == 1 and reward < 150.0:
-                    #     num_one_hop_arrived_w_errors_now += 1
-                    # elif step == 2 and reward >= 150.0:
-                    #     num_two_hop_perfect += 1
-                    # elif step == 2 and reward == previous_reward:
-                    #     num_two_hop_arrived_w_errors_before += 1
-                    # elif step == 2 and previous_reward == 0 and reward < 50:
-                    #     num_two_hop_arrived_w_errors_now += 1
-                    # elif step == 2:
-                    #     num_two_hop_arrived_w_errors += 1
-                    # elif step == 3 and reward >= 150.0:
-                    #     num_three_hop_perfect += 1
-                    # elif step == 3 and reward == previous_reward:
-                    #     num_three_hop_arrived_w_errors_before += 1
-                    # elif step == 3 and previous_reward == 0 and reward < 50:
-                    #     num_three_hop_arrived_w_errors_now += 1
-                    # elif step == 3:
-                    #     num_three_hop_arrived_w_errors += 1
-                    # elif step > 3:
-                    #     num_arrived_wo_routing += 1
-                    # else:
-                    #     num_arrived_w_errors += 1
-
-                # previous_reward = reward
+                        num_error_cases += 1
 
             # Episode reward
             # episode_rewards.append(previous_reward)
@@ -864,22 +830,15 @@ class DQNAgent:
         # Calculate and print the mean score over episodes
         mean_score = np.mean(episode_rewards)
         self.logger.info(f"\n[I] Evaluation mean score over {n_episodes} episodes: {mean_score:.2f}\n")
-        self.logger.info(f'[I] Number of episodes where flow has lost: {num_lost}')
-        self.logger.info(f'[I] Number of episodes where edges had not enough resources: {num_no_resources}')
+        self.logger.info(f'[I] Number of episodes where flow has been perfectly routed and scheduled: {num_perfect}')
+        self.logger.info(f'[I] Number of episodes where flow reached its target with routing faults: {num_arrived_wo_routing}')
+        self.logger.info(f'[I] Number of episodes where flow reached its target with schedule faults: {num_arrived_wo_scheduling}')
+        self.logger.info(f'[I] Number of episodes where flow reached its target with routing and scheduling faults: {num_arrived}')
+        # self.logger.info(f'[I] Number of episodes where agent chose a bad position: {num_bad_schedule}')
         self.logger.info(f'[I] Number of episodes where flow delay exceeded the allowed maximum: {num_delayed}')
-        self.logger.info(f'[I] Number of episodes where agent chose a bad position: {num_bad_schedule}')
-        # self.logger.info(f'[I] Number of episodes where 1-hop flow has been perfectly routed and scheduled: {num_one_hop_perfect}')
-        # self.logger.info(f'[I] Number of episodes where 1-hop flow reached its target with schedule faults: {num_one_hop_arrived_w_errors_now}')
-        self.logger.info(f'[I] Number of episodes where 2-hop flow has been perfectly routed and scheduled: {num_two_hop_perfect}')
-        # self.logger.info(f'[I] Number of episodes where 2-hop flow reached its target with schedule faults only before arriving: {num_two_hop_arrived_w_errors_before}')
-        # self.logger.info(f'[I] Number of episodes where 2-hop flow reached its target with schedule faults only when arriving: {num_two_hop_arrived_w_errors_now}')
-        self.logger.info(f'[I] Number of episodes where 2-hop flow reached its target with routing faults: {num_two_hop_arrived_w_errors}')
-        # self.logger.info(f'[I] Number of episodes where 3-hop flow has been perfectly routed and scheduled: {num_three_hop_perfect}')
-        # self.logger.info(f'[I] Number of episodes where 3-hop flow reached its target with schedule faults only before arriving: {num_three_hop_arrived_w_errors_before}')
-        # self.logger.info(f'[I] Number of episodes where 3-hop flow reached its target with schedule faults only when arriving: {num_three_hop_arrived_w_errors_now}')
-        # self.logger.info(f'[I] Number of episodes where 3-hop flow reached its target with schedule faults when and before arriving: {num_three_hop_arrived_w_errors}')
-        # self.logger.info(f'[I] Number of episodes where multihop flow reached its target with routing faults: {num_arrived_wo_routing}')
-        self.logger.info(f'[I] Number of not able to describe cases: {num_arrived_w_errors}')
+        self.logger.info(f'[I] Number of episodes where edges had not enough resources: {num_no_resources}')
+        self.logger.info(f'[I] Number of episodes where flow has lost: {num_lost}')
+        self.logger.info(f'[I] Number of not able to describe cases: {num_error_cases}')
 
         # Reset epsilon to its original value after evaluation for continuing with training
         self.epsilon = original_epsilon

@@ -40,7 +40,8 @@ class EnvironmentTSN(gym.Env):
         # Logging settings
         self.logger = logging.getLogger('env')
         self.logger.setLevel(ENV_LOG_LEVEL)
-        self.logger.addHandler(logging.FileHandler(ENV_LOG_FILE_NAME + log_file_id + '.log', mode='w', encoding='utf-8'))
+        self.logger.addHandler(
+            logging.FileHandler(ENV_LOG_FILE_NAME + log_file_id + '.log', mode='w', encoding='utf-8'))
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
         self.logger.addHandler(stream_handler)
@@ -301,13 +302,22 @@ class EnvironmentTSN(gym.Env):
             self.logger.info('[I] Could not schedule the action!')
 
     # Returns an array which contains the availability (in percentage) of all positions of the specified edge
-    # Called during generate_background_traffic and reward_function
+    # Called during generate_background_traffic
     def get_edge_positions(self, edge_id):
         position_availabilities = [0] * self.current_vnf['period'] * DIVISION_FACTOR
         for c in range(self.current_vnf['period'] * DIVISION_FACTOR):
             free_bytes = self.get_position_availability(self.edges_info[edge_id]['schedule'], c,
                                                         self.current_vnf['period'])
             position_availabilities[c] = int(100 * free_bytes / SLOT_CAPACITY)
+        return position_availabilities
+
+    # Returns an array which contains the availability (in bytes) of all positions of the specified edge
+    # Called during reward_function
+    def get_edge_positions_real(self, edge_id):
+        position_availabilities = [0] * self.current_vnf['period'] * DIVISION_FACTOR
+        for c in range(self.current_vnf['period'] * DIVISION_FACTOR):
+            position_availabilities[c] = self.get_position_availability(self.edges_info[edge_id]['schedule'], c,
+                                                                        self.current_vnf['period'])
         return position_availabilities
 
     # Finds the availability of a position, which is the minimum availability of the slots of that position
@@ -326,13 +336,13 @@ class EnvironmentTSN(gym.Env):
     def reward_function(self, action):
         if action[0] < len(self.edges_info):
             # Compute availabilities of all positions
-            position_availabilities = self.get_edge_positions(action[0])
+            position_availabilities = self.get_edge_positions_real(action[0])
 
             # Not take into account the load of the current VNF
-            position_availabilities[action[1]] += int(100 * self.current_vnf['length'] / SLOT_CAPACITY)
+            position_availabilities[action[1]] += self.current_vnf['length']
 
             # Decrease the reward if scheduling was not optimal (not selected the best position)
-            # self.reward += 0.1 * (position_availabilities[action[1]] - max(position_availabilities))
+            self.reward += 0.008 * (position_availabilities[action[1]] - max(position_availabilities))
 
             # Decrease the reward by the distance from the current node to the target node (in delay terms)
             cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
@@ -342,9 +352,6 @@ class EnvironmentTSN(gym.Env):
             # If the agent did not choose the position with more availability, mark as non-optimal
             if max(position_availabilities) != position_availabilities[action[1]]:
                 self.optimal_positions = False
-                self.terminated = True
-                self.reward -= 100
-                return -2
 
         # If the episode is ended, check why
         if self.terminated:
@@ -359,12 +366,13 @@ class EnvironmentTSN(gym.Env):
                     self.reward += 300
                     return 0
                 # If just routing was optimal increase reward by 50
-                # elif self.current_delay == nx.dijkstra_path_length(self.graph,
-                #                                                    self.current_vnf['source'],
-                #                                                    self.current_vnf['destination']) \
-                #         and self.optimal_positions is False \
-                #         and self.current_delay <= self.current_vnf['max_delay']:
-                #     self.reward += 50
+                elif self.current_delay == nx.dijkstra_path_length(self.graph,
+                                                                   self.current_vnf['source'],
+                                                                   self.current_vnf['destination']) \
+                        and self.optimal_positions is False \
+                        and self.current_delay <= self.current_vnf['max_delay']:
+                    self.reward += 150
+                    return 2
                 # If just scheduling was optimal increase reward by 150
                 elif nx.dijkstra_path_length(self.graph,
                                              self.current_vnf['source'],
@@ -374,12 +382,13 @@ class EnvironmentTSN(gym.Env):
                     self.reward += 150
                     return 1
                 # If neither routing nor scheduling were optimal leave the reward as 0
-                # elif nx.dijkstra_path_length(self.graph,
-                #                              self.current_vnf['source'],
-                #                              self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
-                #     'max_delay'] \
-                #         and self.optimal_positions is False:
-                #     self.reward = 0
+                elif nx.dijkstra_path_length(self.graph,
+                                             self.current_vnf['source'],
+                                             self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                    'max_delay'] \
+                        and self.optimal_positions is False:
+                    self.reward = 0
+                    return 3
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward
         if self.current_delay > self.current_vnf['max_delay']:
             self.logger.warning(f"Maximum delay exceeded! {self.current_delay} -- {self.current_vnf['max_delay']}")
@@ -432,7 +441,7 @@ class EnvironmentTSN(gym.Env):
             for i in range(3):
                 self.logger.debug('[D] RESET. Edge ' + str(i) + ' |  position availabilities: ' +
                                   str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + (
-                                              (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
+                                          (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         return obs, info
 
     def step(self, action_int):
@@ -488,7 +497,7 @@ class EnvironmentTSN(gym.Env):
             for i in range(3):
                 self.logger.debug('[D] STEP. Edge ' + str(i) + ' |  position availabilities: ' +
                                   str(obs[7 + (i * (self.hyperperiod * DIVISION_FACTOR)):7 + (
-                                              (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
+                                          (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         if self.terminated:
             self.logger.info('[I] Ending episode...\n')
         return obs, self.reward, self.terminated, truncated, info

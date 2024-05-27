@@ -51,13 +51,13 @@ TRAINING_EDGES = {
 
 # VNF generator settings
 VNF_LENGTH = [1500]  # List of the possible lengths of packets to generate in random VNFs
-VNF_DELAY = [70, 100, 130, 160]  # List of possible delay bounds to generate in random VNFs
+VNF_DELAY = [160]  # List of possible delay bounds to generate in random VNFs
 VNF_PERIOD = [4]  # List of possible periods to generate in random VNFs
 #                                          Must ALWAYS be set (maximum value is used as hyperperiod)
 
 # Agent settings
 MODEL_PATH = "models/DQN/"  # Path where models will be stored. Filenames are auto. Make sure that the directory exists!
-SEED = 1976  # 1976  # Seed used for randomization purposes
+SEED = None  # 1976  # Seed used for randomization purposes
 
 # Plotting settings
 SAVE_PLOTS = True
