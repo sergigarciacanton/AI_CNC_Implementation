@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
-from config import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
+from config_new import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
     PLOTS_PATH, SAVE_PLOTS, TIMESTEPS_LIMIT
 import os
 import logging
@@ -158,17 +158,16 @@ def save_evaluation(evaluation_num: int, obs: np.ndarray, reward: float, done: b
 
 
 def get_action_space(obs, previous_node):
-    length = obs[2]
-    current_node = obs[5]
+    current_node = obs[1]
 
     # Get those actions that are feasible: just useful positions of useful edges
     action_space = []
     a = 0
-    i = 7
+    i = 4
     for e in TRAINING_EDGES:
         if current_node == e[0]:
             for _ in range(16 * DIVISION_FACTOR):
-                if obs[i] > length:
+                if obs[i] == 1:
                     action_space.append(a)
                 i += 1
                 a += 1
@@ -846,3 +845,103 @@ class DQNAgent:
         # Close the environment
         eval_env.close()
         self.evaluation += 1
+
+    def evaluate_routes(self, eval_env: gym.Env, n_episodes: int = 50):
+        """
+        Evaluate the agent's performance over multiple episodes.
+
+        Parameters:
+            eval_env (gym.Env): The environment for evaluation.
+            n_episodes (int, optional): The number of episodes to run the evaluation. Default is 10.
+
+        Returns:
+            List[pd.DataFrame]: List of DataFrames containing evaluation results for each episode.
+
+        This method temporarily sets the exploration rate (epsilon) to 0 to evaluate the agent's behavior.
+        It runs the agent in the provided environment for the specified number of episodes, calculates the mean score,
+        and prints the result. The original epsilon value is restored after evaluation.
+
+        """
+        for i in list(self.env.get_graph().nodes):
+            for j in list(self.env.get_graph().nodes):
+
+                # Temporarily store the current epsilon value
+                original_epsilon = self.epsilon
+
+                # Set epsilon to 0 for evaluation
+                self.epsilon = 0
+
+                # Episode reward list
+                episode_rewards = []
+
+                num_lost = 0
+                num_no_resources = 0
+                num_delayed = 0
+                # num_bad_schedule = 0
+                num_arrived = 0
+                num_arrived_wo_scheduling = 0
+                num_perfect = 0
+                num_arrived_wo_routing = 0
+                num_error_cases = 0
+                for episode in range(n_episodes):
+                    obs, info = eval_env.reset(options={'route': [i, j]})
+                    done = False
+                    step = 0
+                    reward = 0
+
+                    while not done:
+                        action = self.select_action(obs, info['previous_node'])
+                        next_obs, reward, terminated, truncated, info = eval_env.step(action)
+                        obs = next_obs
+                        done = terminated or truncated
+                        step += 1
+                        if done:
+                            exit_code = info['exit_code']
+                            if exit_code == 0:
+                                num_perfect += 1
+                            elif exit_code == 1:
+                                num_arrived_wo_routing += 1
+                            elif exit_code == 2:
+                                num_arrived_wo_scheduling += 1
+                            elif exit_code == 3:
+                                num_arrived += 1
+                            elif exit_code == -1:
+                                num_delayed += 1
+                            # elif exit_code == -2:
+                            #     num_bad_schedule += 1
+                            elif exit_code == -3:
+                                num_no_resources += 1
+                            elif exit_code == -4:
+                                num_lost += 1
+                            else:
+                                num_error_cases += 1
+
+                    # Episode reward
+                    # episode_rewards.append(previous_reward)
+                    episode_rewards.append(reward)
+
+                # Calculate and print the mean score over episodes
+                mean_score = np.mean(episode_rewards)
+                self.logger.info(
+                    f"\n[I] Evaluation mean score over {n_episodes} episodes for route {i} --> {j}: {mean_score:.2f}\n")
+                self.logger.info(
+                    f'[I] Number of episodes where flow has been perfectly routed and scheduled: {num_perfect}')
+                self.logger.info(
+                    f'[I] Number of episodes where flow reached its target with routing faults: {num_arrived_wo_routing}')
+                self.logger.info(
+                    f'[I] Number of episodes where flow reached its target with schedule faults: {num_arrived_wo_scheduling}')
+                self.logger.info(
+                    f'[I] Number of episodes where flow reached its target with routing and scheduling faults: {num_arrived}')
+                # self.logger.info(f'[I] Number of episodes where agent chose a bad position: {num_bad_schedule}')
+                self.logger.info(
+                    f'[I] Number of episodes where flow delay exceeded the allowed maximum: {num_delayed}')
+                self.logger.info(f'[I] Number of episodes where edges had not enough resources: {num_no_resources}')
+                self.logger.info(f'[I] Number of episodes where flow has lost: {num_lost}')
+                self.logger.info(f'[I] Number of not able to describe cases: {num_error_cases}')
+
+                # Reset epsilon to its original value after evaluation for continuing with training
+                self.epsilon = original_epsilon
+
+                # Close the environment
+                eval_env.close()
+                self.evaluation += 1

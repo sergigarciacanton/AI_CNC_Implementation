@@ -1,10 +1,10 @@
-from Environment import EnvironmentTSN
+from routing_environment import EnvironmentTSN
 import time
-from dqn import DQNAgent
-from config import TIMESTEPS_LIMIT, BACKGROUND_STREAMS
+from routing_dqn import DQNAgent
+from routing_config import TIMESTEPS_LIMIT, BACKGROUND_STREAMS
 
 
-main_id = '4'
+main_id = 'routing_2'
 ENV = EnvironmentTSN(main_id)
 
 while ENV.ready is False:
@@ -15,7 +15,7 @@ agent = DQNAgent(
     replay_buffer_size=1000000,
     batch_size=6,
     target_update=400,
-    epsilon_decay=1 / 40000,
+    epsilon_decay=1 / 4000000,
     seed=None,
     max_epsilon=1.0,
     min_epsilon=0.0,
@@ -36,7 +36,7 @@ while True:
         print('[!] Expected to introduce a number! Try again...')
 
 if option == 0:
-    max_steps = 100000
+    max_steps = 10000000
     agent.logger.info('[I] Chose training model')
     agent.logger.info('[I] Settings: time_steps = ' + str(max_steps) + ' | timestep_limit = ' + str(TIMESTEPS_LIMIT) +
                       ' | epsilon = ' + str(agent.epsilon_decay) + ' | background flows = ' + str(BACKGROUND_STREAMS) +
@@ -45,15 +45,10 @@ if option == 0:
                       ' | target update = ' + str(agent.update_target_every_steps) + ' | gamma = ' + str(agent.gamma) +
                       ' | learning rate = ' + str(agent.learning_rate) + ' | tau = ' + str(agent.tau))
     agent.logger.info('[I] Extra info: ' + str(input('[*] Introduce any other setting data (just to print it): ')))
-    agent.train(max_steps=max_steps, monitor_training=10000, plotting_interval=20000)
-
-elif option == 1:
-    agent.logger.info('[I] Chose evaluating best model')
-    agent.load_model()
-    agent.evaluate(ENV, 100)
+    agent.train(max_steps=max_steps, monitor_training=100000, plotting_interval=1000000)
 
 elif option == 2:
     agent.logger.info('[I] Chose evaluating custom model')
-    model_name = input('[*] Introduce the name of the model: ')
-    agent.load_custom_model(model_name)
+    routing_model_name = input('[*] Introduce the name of the routing model: ')
+    agent.load_custom_model(routing_model_name)
     agent.evaluate(ENV, 1000)

@@ -1,4 +1,5 @@
 import random
+from typing import Any
 import gymnasium as gym
 import networkx as nx
 import pika
@@ -8,11 +9,12 @@ import logging
 import sys
 from colorlog import ColoredFormatter
 import time
+from gymnasium.core import ObsType
 from gymnasium.spaces import Discrete
 from vnf_generator import VNF
 import numpy as np
 from itertools import chain
-from config import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USERNAME, \
+from v_1.config import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USERNAME, \
     RABBITMQ_PASSWORD, RABBITMQ_EXCHANGE_NAME, TIMESTEPS_LIMIT, SLOT_CAPACITY, DIVISION_FACTOR, TRAINING_IF, \
     TRAINING_NODES, TRAINING_EDGES, BACKGROUND_STREAMS, VNF_PERIOD
 
@@ -222,7 +224,6 @@ class EnvironmentTSN(gym.Env):
                                     'background streams (see config.py --> BACKGROUND_STREAMS)')
                                 return
                             break
-                        break
 
     # Allocate resources for a background stream. Called during generate_background_traffic
     # Returns True if scheduling is possible and False otherwise
@@ -397,7 +398,8 @@ class EnvironmentTSN(gym.Env):
             return -1
         return None
 
-    def reset(self, seed=None):
+    def reset(self, *, seed: int | None = None,
+              options: dict[str, Any] | None = None) -> tuple[ObsType, dict[str, Any]]:
         super().reset(seed=seed)
 
         # Reset terminated, route, schedule, reward, remaining time steps and elapsed time

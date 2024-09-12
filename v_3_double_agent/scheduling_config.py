@@ -21,44 +21,44 @@ BACKGROUND_STREAMS = 300  # 750  # Number of streams to create as background tra
 
 # Training settings
 TRAINING_IF = True  # Toggle training mode. When training, VNFs are random and topology is given in this section
-TRAINING_NODES = [0, 1, 2, 3, 4, 5, 6, 7]  # List of nodes in the training net
-TRAINING_EDGES = {
-    (0, 1): {'delay': 10},
-    (1, 0): {'delay': 10},
-    (1, 3): {'delay': 20},
-    (3, 1): {'delay': 20},
-    (3, 2): {'delay': 30},
-    (2, 3): {'delay': 30},
-    (2, 0): {'delay': 40},
-    (0, 2): {'delay': 40},
-    (0, 4): {'delay': 30},
-    (4, 0): {'delay': 30},
-    (1, 5): {'delay': 50},
-    (5, 1): {'delay': 50},
-    (3, 7): {'delay': 70},
-    (7, 3): {'delay': 70},
-    (2, 6): {'delay': 10},
-    (6, 2): {'delay': 10},
-    (4, 5): {'delay': 40},
-    (5, 4): {'delay': 40},
-    (5, 7): {'delay': 10},
-    (7, 5): {'delay': 10},
-    (7, 6): {'delay': 20},
-    (6, 7): {'delay': 20},
-    (6, 4): {'delay': 30},
-    (4, 6): {'delay': 30},
+NODES = [0, 1, 2, 3, 4, 5, 6, 7]  # List of nodes in the training net
+EDGES = {
+    (0, 1): {'delay': 1},
+    (0, 2): {'delay': 4},
+    (0, 4): {'delay': 3},
+    (1, 0): {'delay': 1},
+    (1, 3): {'delay': 2},
+    (1, 5): {'delay': 5},
+    (2, 0): {'delay': 4},
+    (2, 3): {'delay': 3},
+    (2, 6): {'delay': 1},
+    (3, 1): {'delay': 2},
+    (3, 2): {'delay': 3},
+    (3, 7): {'delay': 7},
+    (4, 0): {'delay': 3},
+    (4, 5): {'delay': 4},
+    (4, 6): {'delay': 3},
+    (5, 1): {'delay': 5},
+    (5, 4): {'delay': 4},
+    (5, 7): {'delay': 1},
+    (6, 2): {'delay': 1},
+    (6, 4): {'delay': 3},
+    (6, 7): {'delay': 2},
+    (7, 3): {'delay': 7},
+    (7, 5): {'delay': 1},
+    (7, 6): {'delay': 2},
 }
 
 # VNF generator settings
-VNF_LENGTH = [1500]  # List of the possible lengths of packets to generate in random VNFs
-VNF_DELAY = [160]  # List of possible delay bounds to generate in random VNFs
-VNF_PERIOD = [4]  # List of possible periods to generate in random VNFs
+VNF_LENGTH = [128, 256, 512, 1024, 1500]  # List of the possible lengths of packets to generate in random VNFs
+VNF_DELAY = [16]  # List of possible delay bounds to generate in random VNFs
+VNF_PERIOD = [2, 4, 8, 16]  # List of possible periods to generate in random VNFs
 #                                          Must ALWAYS be set (maximum value is used as hyperperiod)
 
 # Agent settings
-MODEL_PATH = "models/DQN/"  # Path where models will be stored. Filenames are auto. Make sure that the directory exists!
-SEED = None  # 1976  # Seed used for randomization purposes
+MODEL_PATH = "../models/DQN/scheduling/"  # Path where models will be stored. Make sure that the directory exists!
+SEED = 1976  # 1976  # Seed used for randomization purposes
 
 # Plotting settings
 SAVE_PLOTS = True
-PLOTS_PATH = 'plots/DQN/'
+PLOTS_PATH = '../plots/DQN/scheduling/'
