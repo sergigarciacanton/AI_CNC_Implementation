@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
-from config_new import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
+from config_distributed import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES_A, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
     PLOTS_PATH, SAVE_PLOTS, TIMESTEPS_LIMIT
 import os
 import logging
@@ -164,7 +164,7 @@ def get_action_space(obs, previous_node):
     action_space = []
     a = 0
     i = 4
-    for e in TRAINING_EDGES:
+    for e in TRAINING_EDGES_A:
         if current_node == e[0]:
             for _ in range(16 * DIVISION_FACTOR):
                 if obs[i] == 1:
@@ -273,7 +273,7 @@ class ReplayBuffer:
         return self.size
 
 
-class DQNAgent:
+class DQNAgentA:
     """DQN Agent interacting with environment."""
 
     def __init__(
@@ -293,8 +293,8 @@ class DQNAgent:
 
         # Spaces
         # obs_space = len(env.observation_space)
-        obs_space = env.observation_space.n
-        action_space = env.action_space.n
+        obs_space = env.observation_space_A.n
+        action_space = env.action_space_A.n
 
         # Attributes
         self.env = env
@@ -312,13 +312,12 @@ class DQNAgent:
         self.evaluation = 1
 
         # Logging settings
-        self.logger = logging.getLogger('dqn')
+        self.logger = logging.getLogger('dqn_A')
         self.logger.setLevel(DQN_LOG_LEVEL)
         self.logger.addHandler(logging.FileHandler(DQN_LOG_FILE_NAME + log_file_id + '.log', mode='w', encoding='utf-8'))
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
         self.logger.addHandler(stream_handler)
-        logging.getLogger('pika').setLevel(logging.WARNING)
 
         # Initialize UPC scenario graph
         self.graph = env.get_graph()
@@ -328,7 +327,7 @@ class DQNAgent:
         if str(self.device) == 'cpu':
             self.logger.warning('[!] WARNING! Processing device: ' + str(self.device))
         else:
-            self.logger.info('[I] Processing device: ' + str(self.device))
+            self.logger.info('[I] A Processing device: ' + str(self.device))
 
         # networks: online, target
         self.online_net = Network(obs_space, action_space).to(self.device)
@@ -388,7 +387,7 @@ class DQNAgent:
 
         if SAVE_PLOTS and step == max_steps:
             date = datetime.now(tz=timezone(timedelta(hours=2))).strftime('%Y%m%d%H%M')
-            plt.savefig(PLOTS_PATH + 'plot_' + date + '_' + str(int(np.mean(scores[-100:]))) + '.png')
+            plt.savefig(PLOTS_PATH + 'plot_' + date + '_' + str(int(np.mean(scores[-100:]))) + '_A.png')
 
         plt.show()
 
@@ -746,7 +745,7 @@ class DQNAgent:
         # Save model
         if episodes_count > 1000:
             date = datetime.now(tz=timezone(timedelta(hours=2))).strftime('%Y%m%d%H%M')
-            model_name = 'model_' + date + '_' + str(int(np.mean(scores[-100:]))) + '.pt'
+            model_name = 'model_' + date + '_' + str(int(np.mean(scores[-100:]))) + '_A.pt'
             torch.save(self.online_net.state_dict(), MODEL_PATH + model_name)
 
         # Close env

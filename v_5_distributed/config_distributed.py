@@ -12,7 +12,7 @@ RABBITMQ_PASSWORD = None  # Password of RabbitMQ server. If None, auth data is i
 RABBITMQ_EXCHANGE_NAME = 'tsn'  # Name of the exchange where to publish data and subscribe
 
 # Environment settings
-TIMESTEPS_LIMIT = 5  # Maximum number of time-steps an episode can last
+TIMESTEPS_LIMIT = 10  # Maximum number of time-steps an episode can last
 SLOT_CAPACITY = 12500  # Number of bytes that can be transmitted at each time slot
 DIVISION_FACTOR = 1  # Number of slots to define per millisecond
 
@@ -21,7 +21,7 @@ BACKGROUND_STREAMS = 300  # 300  # Number of streams to create as background tra
 
 # Training settings
 TRAINING_IF = True  # Toggle training mode. When training, VNFs are random and topology is given in this section
-TRAINING_NODES = [0, 1, 2, 3, 4, 5, 6, 7]  # List of nodes in the training net
+TRAINING_NODES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]  # List of nodes in the training net
 TRAINING_EDGES = {
     (0, 1): {'delay': 1},
     (1, 0): {'delay': 1},
@@ -33,8 +33,6 @@ TRAINING_EDGES = {
     (0, 2): {'delay': 4},
     (0, 4): {'delay': 3},
     (4, 0): {'delay': 3},
-    (1, 5): {'delay': 5},
-    (5, 1): {'delay': 5},
     (3, 7): {'delay': 7},
     (7, 3): {'delay': 7},
     (2, 6): {'delay': 1},
@@ -47,6 +45,74 @@ TRAINING_EDGES = {
     (6, 7): {'delay': 2},
     (6, 4): {'delay': 3},
     (4, 6): {'delay': 3},
+    (1, 8): {'delay': 2},
+    (5, 9): {'delay': 1},
+    (8, 10): {'delay': 4},
+    (10, 8): {'delay': 4},
+    (10, 11): {'delay': 3},
+    (11, 10): {'delay': 3},
+    (10, 12): {'delay': 1},
+    (12, 10): {'delay': 1},
+    (12, 13): {'delay': 5},
+    (13, 12): {'delay': 5},
+    (13, 11): {'delay': 4},
+    (11, 13): {'delay': 4},
+    (13, 14): {'delay': 1},
+    (14, 13): {'delay': 1},
+    (14, 9): {'delay': 2},
+    (9, 14): {'delay': 2},
+    (9, 8): {'delay': 1},
+    (8, 9): {'delay': 1},
+    (9, 5): {'delay': 1},
+    (8, 1): {'delay': 2}
+}
+TRAINING_NODES_A = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]  # List of nodes in the training net
+TRAINING_EDGES_A = {
+    (0, 1): {'delay': 1},
+    (1, 0): {'delay': 1},
+    (1, 3): {'delay': 2},
+    (3, 1): {'delay': 2},
+    (3, 2): {'delay': 3},
+    (2, 3): {'delay': 3},
+    (2, 0): {'delay': 4},
+    (0, 2): {'delay': 4},
+    (0, 4): {'delay': 3},
+    (4, 0): {'delay': 3},
+    (3, 7): {'delay': 7},
+    (7, 3): {'delay': 7},
+    (2, 6): {'delay': 1},
+    (6, 2): {'delay': 1},
+    (4, 5): {'delay': 4},
+    (5, 4): {'delay': 4},
+    (5, 7): {'delay': 1},
+    (7, 5): {'delay': 1},
+    (7, 6): {'delay': 2},
+    (6, 7): {'delay': 2},
+    (6, 4): {'delay': 3},
+    (4, 6): {'delay': 3},
+    (1, 8): {'delay': 2},
+    (5, 9): {'delay': 1}
+}
+TRAINING_NODES_B = [1, 5, 8, 9, 10, 11, 12, 13, 14]  # List of nodes in the training net
+TRAINING_EDGES_B = {
+    (8, 10): {'delay': 4},
+    (10, 8): {'delay': 4},
+    (10, 11): {'delay': 3},
+    (11, 10): {'delay': 3},
+    (10, 12): {'delay': 1},
+    (12, 10): {'delay': 1},
+    (12, 13): {'delay': 5},
+    (13, 12): {'delay': 5},
+    (13, 11): {'delay': 4},
+    (11, 13): {'delay': 4},
+    (13, 14): {'delay': 1},
+    (14, 13): {'delay': 1},
+    (14, 9): {'delay': 2},
+    (9, 14): {'delay': 2},
+    (9, 8): {'delay': 1},
+    (8, 9): {'delay': 1},
+    (9, 5): {'delay': 1},
+    (8, 1): {'delay': 2}
 }
 
 # VNF generator settings
@@ -56,9 +122,9 @@ VNF_PERIOD = [2, 4, 8, 16]  # List of possible periods to generate in random VNF
 #                                          Must ALWAYS be set (maximum value is used as hyperperiod)
 
 # Agent settings
-MODEL_PATH = "../models/DQN/new/"  # Path where models will be stored. Filenames are auto. Make sure that the directory exists!
+MODEL_PATH = "../models/DQN/dist/"  # Path where models will be stored. Filenames are auto. Make sure that the directory exists!
 SEED = 1976  # 1976  # Seed used for randomization purposes
 
 # Plotting settings
 SAVE_PLOTS = True
-PLOTS_PATH = '../plots/DQN/new/'
+PLOTS_PATH = '../plots/DQN/dist/'

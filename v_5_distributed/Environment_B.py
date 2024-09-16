@@ -2,24 +2,20 @@ import random
 from typing import Any
 import gymnasium as gym
 import networkx as nx
-import pika
-import threading
-import json
 import logging
 import sys
 from colorlog import ColoredFormatter
 import time
 from gymnasium.core import ObsType
 from gymnasium.spaces import Discrete
-from vnf_generator_new import VNF
+from vnf_generator_B import VNF
 import numpy as np
 from itertools import chain
-from config_new import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USERNAME, \
-    RABBITMQ_PASSWORD, RABBITMQ_EXCHANGE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, TRAINING_IF, \
-    TRAINING_NODES, TRAINING_EDGES, BACKGROUND_STREAMS, VNF_PERIOD, TIMESTEPS_LIMIT
+from config_distributed import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, TRAINING_IF, \
+    TRAINING_NODES_B, TRAINING_EDGES_B, BACKGROUND_STREAMS, TIMESTEPS_LIMIT
 
 
-class EnvironmentTSN(gym.Env):
+class EnvironmentB(gym.Env):
     # Environment initialization
     def __init__(self, log_file_id):
         self.graph = nx.DiGraph()  # Graph containing the network topology. Training topology is given at config.py
@@ -29,6 +25,7 @@ class EnvironmentTSN(gym.Env):
         self.edges_info = {}  # Dict containing all edges' information: source, destination, delay and schedule
         self.hyperperiod = None  # Time duration of a hyperperiod [ms]. Set as maximum VNF period (see config.py)
         self.reward = 0  # Cumulative reward of the episode
+        self.remaining_timesteps = None
         self.optimal_positions = True  # Set to false if agent chooses non-optimal positions. Used in reward_function
         self.terminated = False  # Check whether episode has ended
         self.ready = False  # False until topology and VNFs have been received by RabbitMQ. True if training
@@ -50,144 +47,42 @@ class EnvironmentTSN(gym.Env):
         logging.getLogger('pika').setLevel(logging.WARNING)
 
         # Init procedure: get network topology and VNFs list
-        # If not training, RabbitMQ subscriber is set and env waits for topology and VNFs to be published
-        # If training, Network topology is generated using config.py parameters and VNFs are randomly created
-        if not TRAINING_IF:
-            self.logger.info('[I] Training disabled. Waiting for topology and VNF list...')
-            # If there are no auth settings, just try to connect to the given host (see config.py)
-            # In case of having auth settings, use them to connect
-            if RABBITMQ_PORT is None or RABBITMQ_USERNAME is None or RABBITMQ_PASSWORD is None:
-                self.rabbitmq_conn = pika.BlockingConnection(pika.ConnectionParameters(host=RABBITMQ_HOST))
-            else:
-                self.rabbitmq_conn = pika.BlockingConnection(
-                    pika.ConnectionParameters(host=RABBITMQ_HOST, port=RABBITMQ_PORT,
-                                              credentials=pika.PlainCredentials(RABBITMQ_USERNAME, RABBITMQ_PASSWORD)))
+        self.logger.info('[I] Training enabled. Reading topology from config...')
+        # Generate graph adding given topology (see config.py)
+        self.graph.add_nodes_from(TRAINING_NODES_B)
+        for edge, data in TRAINING_EDGES_B.items():
+            source, target = edge
+            self.graph.add_edge(source, target, weight=data['delay'])
+        self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
+                         + str(self.graph.number_of_edges()) + ' edges')
 
-            # Create thread that subscribes to the RabbitMQ channels that publish the desired information
-            self.subscribe_thread = threading.Thread(target=self.rabbitmq_subscribe,
-                                                     args=(self.rabbitmq_conn, 'top-pre jet-pre'))
-            self.subscribe_thread.daemon = True
-            self.subscribe_thread.start()
-        else:
-            self.logger.info('[I] Training enabled. Reading topology from config...')
-            # Generate graph adding given topology (see config.py)
-            self.graph.add_nodes_from(TRAINING_NODES)
-            for edge, data in TRAINING_EDGES.items():
-                source, target = edge
-                self.graph.add_edge(source, target, weight=data['delay'])
-            self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
-                             + str(self.graph.number_of_edges()) + ' edges')
+        # Hyperperiod setting. Use maximum period of a given set (see config.py)
+        self.hyperperiod = 16  # max(VNF_PERIOD)
 
-            # Hyperperiod setting. Use maximum period of a given set (see config.py)
-            self.hyperperiod = 16  # max(VNF_PERIOD)
+        # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
+        id_edge = 0
+        for edge, delay in TRAINING_EDGES_B.items():
+            self.edges_info[id_edge] = dict(source=edge[0], destination=edge[1],
+                                            schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
+                                            delay=delay['delay'])
+            id_edge += 1
 
-            # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
-            id_edge = 0
-            for edge, delay in TRAINING_EDGES.items():
-                self.edges_info[id_edge] = dict(source=edge[0], destination=edge[1],
-                                                schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
-                                                delay=delay['delay'])
-                id_edge += 1
-
-            # Ready to work. Observation and action spaces can now be defined
-            self.ready = True
-
-        while self.ready is False:
-            time.sleep(1)
+        # Ready to work. Observation and action spaces can now be defined
+        self.ready = True
 
         self.logger.info('[I] Environment ready to operate')
 
         # Observation space
         num_obs_features = 4 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
         # self.observation_space = MultiDiscrete(np.array([1] * num_obs_features), dtype=np.int32)
-        self.observation_space = Discrete(num_obs_features)
+        self.observation_space_B = Discrete(num_obs_features)
 
         # Action space
-        self.action_space = Discrete(len(TRAINING_EDGES) * self.hyperperiod * DIVISION_FACTOR + 1)
+        self.action_space_B = Discrete(len(TRAINING_EDGES_B) * self.hyperperiod * DIVISION_FACTOR + 1)
 
     # Returns the graph. Called during agent's initialization
     def get_graph(self):
         return self.graph
-
-    # Subscription function to RabbitMQ channels (executed at a thread). Called during init if not training
-    def rabbitmq_subscribe(self, conn, key_string):
-        # Initial settings: channel and queue creation
-        channel = conn.channel()
-        channel.exchange_declare(exchange=RABBITMQ_EXCHANGE_NAME, exchange_type='direct')
-        queue = channel.queue_declare(queue='', durable=True).method.queue
-
-        # Binding queues to the desired routing keys
-        keys = key_string.split(' ')
-        for key in keys:
-            channel.queue_bind(exchange=RABBITMQ_EXCHANGE_NAME, queue=queue, routing_key=key)
-
-        self.logger.info('[I] Waiting for published data...')
-
-        # Callback function called each time subscriber receives new data
-        def callback(ch, method, properties, body):
-            self.logger.debug("[D] Received. Key: " + str(method.routing_key) + ". Message: " + body.decode("utf-8"))
-            # If routing key is top-pre, the message contains the topology of the network
-            # If routing key is jet-pre, the message contains the list of VNFs
-            if str(method.routing_key) == 'top-pre':
-                # Decode JSON message. Extract nodes, edges and IP addresses of nodes
-                info = json.loads(body.decode('utf-8'))
-                nodes = info["Network_nodes"]
-                edges = info["Network_links"]
-                self.ip_addresses = info["identificator"]
-
-                # Add nodes and edges to nx graph. Use identifiers instead of IP addresses
-                for node in nodes:
-                    self.graph.add_node(node)
-                for edge in edges:
-                    self.graph.add_edge(edge[0], edge[1])
-                    self.edges_info[edge]['source'] = edge[0]
-                    self.edges_info[edge]['destination'] = edge[1]
-
-                self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
-                                 + str(self.graph.number_of_edges()) + ' edges')
-            elif str(method.routing_key) == 'jet-pre':
-                # Decode message. Extract all necessary information of streams and order accordingly
-                info = json.loads(body.decode('utf-8'))
-                for i in range(info['Number_of_Streams']):
-                    self.vnf_list[i] = dict(source=info['Stream_Source_Destination'][i][0],
-                                            destination=info['Stream_Source_Destination'][i][1],
-                                            length=info['Streams_size'][i],
-                                            period=info['Streams_Period'][i],
-                                            max_delay=info['Deathline_Stream'][i])
-                self.logger.info('[I] Received list of VNF. Contains ' + str(len(self.vnf_list)) + ' requests')
-                self.route.append(self.current_node)
-            else:
-                # Should never reach this point. Throw error message
-                self.logger.error('[!] Received unexpected routing key ' + str(method.routing_key) + '!')
-
-            # If both topology and VNFs have been received, some preprocessing has to be carried out before being ready
-            if self.ip_addresses is not {} and self.vnf_list is not {}:
-                # Hyperperiod setting. Use maximum period of a given set (see config.py)
-                # self.hyperperiod = math.lcm(*[self.vnf_list[i]['period'] for i in range(len(self.vnf_list))])
-                self.hyperperiod = max(VNF_PERIOD)
-
-                # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
-                for edge in range(self.graph.number_of_edges()):
-                    self.edges_info[edge]['schedule'] = [SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR
-                    self.edges_info[edge]['delay'] = 10
-
-                # Replace IP addresses stored in source and destination of VNFs by corresponding node identifiers
-                for i in range(len(self.vnf_list)):
-                    for j in range(len(self.ip_addresses)):
-                        if self.vnf_list[i]['source'] == self.ip_addresses[j]:
-                            self.vnf_list[i]['source'] = j
-                        if self.vnf_list[i]['destination'] == self.ip_addresses[j]:
-                            self.vnf_list[i]['destination'] = j
-
-                # Ready to work. Reset can now be fully processed
-                self.ready = True
-
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-
-        # More config stuff outside the callback function definition
-        channel.basic_qos(prefetch_count=1)
-        channel.basic_consume(queue=queue, on_message_callback=callback, auto_ack=True)
-        channel.start_consuming()
 
     # Background traffic generator. Called during reset
     def generate_background_traffic(self):
@@ -196,7 +91,10 @@ class EnvironmentTSN(gym.Env):
         for i in range(BACKGROUND_STREAMS):
             # Create random VNF (see vnf_generator.py) and get the route that will follow (shortest path)
             # VNF = {source, destination, length, period, max_delay, actions}
-            self.background_traffic[i] = VNF(list(self.graph.nodes)).get_request()
+            while True:
+                self.background_traffic[i] = VNF(list(self.graph.nodes), True).get_request()
+                if self.background_traffic[i]['source'] >= 8:
+                    break
             path = random.choice(list(nx.all_shortest_paths(self.graph,
                                                             source=self.background_traffic[i]['source'],
                                                             target=self.background_traffic[i]['destination'])))
@@ -329,9 +227,10 @@ class EnvironmentTSN(gym.Env):
                     break
 
             # Decrease the reward by the distance from the current node to the target node (in delay terms)
-            cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
-                                              target=self.current_vnf['destination'])
-            self.reward -= cur_len
+            if self.current_node >= 8:
+                cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
+                                                  target=self.current_vnf['destination'])
+                self.reward -= cur_len
 
         # If the episode is ended, check why
         if self.terminated:
@@ -369,6 +268,23 @@ class EnvironmentTSN(gym.Env):
                         and self.optimal_positions is False:
                     self.reward = 0
                     return 3
+            else:
+                if nx.dijkstra_path_length(self.graph,
+                                           self.current_vnf['source'],
+                                           self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                    'max_delay'] \
+                        and self.optimal_positions is True and self.current_vnf['destination'] < 8:
+                    self.reward += 150
+                # If neither routing nor scheduling were optimal leave the reward as 0
+                elif nx.dijkstra_path_length(self.graph,
+                                             self.current_vnf['source'],
+                                             self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                    'max_delay'] \
+                        and self.optimal_positions is False and self.current_vnf['destination'] < 8:
+                    self.reward = 0
+                elif self.current_vnf['destination'] > 7:
+                    self.reward -= 100
+                return 4
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward
         if self.current_delay > self.current_vnf['max_delay']:
             self.logger.warning(f"[!] Maximum delay exceeded! ({self.current_delay} > {self.current_vnf['max_delay']})")
@@ -403,6 +319,9 @@ class EnvironmentTSN(gym.Env):
                         else:
                             slot_loads[c] = 0
                 st[edge_id] = slot_loads
+        st_vec = list(chain.from_iterable(st.values()))
+        while len(st_vec) < (3 * self.hyperperiod * DIVISION_FACTOR):
+            st_vec.append(0)
 
         remaining_delay = self.current_vnf['max_delay'] - self.current_delay
 
@@ -411,7 +330,7 @@ class EnvironmentTSN(gym.Env):
               + [self.current_node] \
               + [self.current_position] \
               + [remaining_delay] \
-              + list(chain.from_iterable(st.values()))
+              + st_vec
 
         # Convert state list to a numpy array
         obs = np.array(obs, dtype=np.int16)
@@ -441,9 +360,9 @@ class EnvironmentTSN(gym.Env):
         # If it is training, a random VNF has to be generated
         if TRAINING_IF is True:
             # Generate a random VNF
-            # self.current_vnf = VNF(list(self.graph.nodes)).get_request()
-            # self.current_vnf = VNF(options['route']).get_request()
-            self.current_vnf = VNF(None).get_request()
+            # self.current_vnf = VNF(list(self.graph.nodes), False).get_request()
+            # self.current_vnf = VNF(options['route'], False).get_request()
+            self.current_vnf = VNF(None, False).get_request()
         else:
             # Set the first VNF as the one to process
             self.current_vnf = self.vnf_list[self.vnf_id]
@@ -484,6 +403,7 @@ class EnvironmentTSN(gym.Env):
 
         if action[0] >= len(self.edges_info):
             self.terminated = True
+
             info = {'previous_node': -1, 'exit_code': -3}
         elif truncated:
             info = {'previous_node': -1, 'exit_code': -4}
@@ -500,6 +420,9 @@ class EnvironmentTSN(gym.Env):
                 if self.current_vnf['destination'] == self.current_node:
                     self.terminated = True
                     self.logger.info('[I] Reached destination!')
+                if self.current_node < 8:
+                    self.terminated = True
+                    self.logger.info('[I] Exited from TSN zone')
 
             # Update reward of current episode
             exit_code = self.reward_function(action)
@@ -518,7 +441,6 @@ class EnvironmentTSN(gym.Env):
 
         if ENV_LOG_LEVEL == 10:
             self.logger.debug('[D] STEP. info = ' + str(info) + ', terminated = ' + str(self.terminated) +
-                              ', truncated = ' + str(truncated) +
                               ', reward = ' + str(self.reward) +
                               ', obs = ' + str(obs[0:4]))
             for i in range(3):

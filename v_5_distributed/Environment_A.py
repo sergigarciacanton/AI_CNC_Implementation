@@ -11,15 +11,15 @@ from colorlog import ColoredFormatter
 import time
 from gymnasium.core import ObsType
 from gymnasium.spaces import Discrete
-from vnf_generator_new import VNF
+from vnf_generator_A import VNF
 import numpy as np
 from itertools import chain
-from config_new import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USERNAME, \
+from config_distributed import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USERNAME, \
     RABBITMQ_PASSWORD, RABBITMQ_EXCHANGE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, TRAINING_IF, \
-    TRAINING_NODES, TRAINING_EDGES, BACKGROUND_STREAMS, VNF_PERIOD, TIMESTEPS_LIMIT
+    TRAINING_NODES_A, TRAINING_EDGES_A, BACKGROUND_STREAMS, VNF_PERIOD, TIMESTEPS_LIMIT
 
 
-class EnvironmentTSN(gym.Env):
+class EnvironmentA(gym.Env):
     # Environment initialization
     def __init__(self, log_file_id):
         self.graph = nx.DiGraph()  # Graph containing the network topology. Training topology is given at config.py
@@ -29,6 +29,7 @@ class EnvironmentTSN(gym.Env):
         self.edges_info = {}  # Dict containing all edges' information: source, destination, delay and schedule
         self.hyperperiod = None  # Time duration of a hyperperiod [ms]. Set as maximum VNF period (see config.py)
         self.reward = 0  # Cumulative reward of the episode
+        self.remaining_timesteps = None
         self.optimal_positions = True  # Set to false if agent chooses non-optimal positions. Used in reward_function
         self.terminated = False  # Check whether episode has ended
         self.ready = False  # False until topology and VNFs have been received by RabbitMQ. True if training
@@ -71,8 +72,8 @@ class EnvironmentTSN(gym.Env):
         else:
             self.logger.info('[I] Training enabled. Reading topology from config...')
             # Generate graph adding given topology (see config.py)
-            self.graph.add_nodes_from(TRAINING_NODES)
-            for edge, data in TRAINING_EDGES.items():
+            self.graph.add_nodes_from(TRAINING_NODES_A)
+            for edge, data in TRAINING_EDGES_A.items():
                 source, target = edge
                 self.graph.add_edge(source, target, weight=data['delay'])
             self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
@@ -83,7 +84,7 @@ class EnvironmentTSN(gym.Env):
 
             # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
             id_edge = 0
-            for edge, delay in TRAINING_EDGES.items():
+            for edge, delay in TRAINING_EDGES_A.items():
                 self.edges_info[id_edge] = dict(source=edge[0], destination=edge[1],
                                                 schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
                                                 delay=delay['delay'])
@@ -100,10 +101,10 @@ class EnvironmentTSN(gym.Env):
         # Observation space
         num_obs_features = 4 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
         # self.observation_space = MultiDiscrete(np.array([1] * num_obs_features), dtype=np.int32)
-        self.observation_space = Discrete(num_obs_features)
+        self.observation_space_A = Discrete(num_obs_features)
 
         # Action space
-        self.action_space = Discrete(len(TRAINING_EDGES) * self.hyperperiod * DIVISION_FACTOR + 1)
+        self.action_space_A = Discrete(len(TRAINING_EDGES_A) * self.hyperperiod * DIVISION_FACTOR + 1)
 
     # Returns the graph. Called during agent's initialization
     def get_graph(self):
@@ -196,7 +197,10 @@ class EnvironmentTSN(gym.Env):
         for i in range(BACKGROUND_STREAMS):
             # Create random VNF (see vnf_generator.py) and get the route that will follow (shortest path)
             # VNF = {source, destination, length, period, max_delay, actions}
-            self.background_traffic[i] = VNF(list(self.graph.nodes)).get_request()
+            while True:
+                self.background_traffic[i] = VNF(list(self.graph.nodes), True).get_request()
+                if self.background_traffic[i]['source'] <= 7:
+                    break
             path = random.choice(list(nx.all_shortest_paths(self.graph,
                                                             source=self.background_traffic[i]['source'],
                                                             target=self.background_traffic[i]['destination'])))
@@ -329,9 +333,10 @@ class EnvironmentTSN(gym.Env):
                     break
 
             # Decrease the reward by the distance from the current node to the target node (in delay terms)
-            cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
-                                              target=self.current_vnf['destination'])
-            self.reward -= cur_len
+            if self.current_node <= 7:
+                cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
+                                                  target=self.current_vnf['destination'])
+                self.reward -= cur_len
 
         # If the episode is ended, check why
         if self.terminated:
@@ -369,6 +374,23 @@ class EnvironmentTSN(gym.Env):
                         and self.optimal_positions is False:
                     self.reward = 0
                     return 3
+            else:
+                if nx.dijkstra_path_length(self.graph,
+                                           self.current_vnf['source'],
+                                           self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                    'max_delay'] \
+                        and self.optimal_positions is True and self.current_vnf['destination'] > 7:
+                    self.reward += 150
+                # If neither routing nor scheduling were optimal leave the reward as 0
+                elif nx.dijkstra_path_length(self.graph,
+                                             self.current_vnf['source'],
+                                             self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
+                    'max_delay'] \
+                        and self.optimal_positions is False and self.current_vnf['destination'] > 7:
+                    self.reward = 0
+                elif self.current_vnf['destination'] < 8:
+                    self.reward -= 100
+                return 4
         # If delay has reached the maximum acceptable value, end the episode and decrease by 100 the reward
         if self.current_delay > self.current_vnf['max_delay']:
             self.logger.warning(f"[!] Maximum delay exceeded! ({self.current_delay} > {self.current_vnf['max_delay']})")
@@ -403,6 +425,9 @@ class EnvironmentTSN(gym.Env):
                         else:
                             slot_loads[c] = 0
                 st[edge_id] = slot_loads
+        st_vec = list(chain.from_iterable(st.values()))
+        while len(st_vec) < (3 * self.hyperperiod * DIVISION_FACTOR):
+            st_vec.append(0)
 
         remaining_delay = self.current_vnf['max_delay'] - self.current_delay
 
@@ -411,7 +436,7 @@ class EnvironmentTSN(gym.Env):
               + [self.current_node] \
               + [self.current_position] \
               + [remaining_delay] \
-              + list(chain.from_iterable(st.values()))
+              + st_vec
 
         # Convert state list to a numpy array
         obs = np.array(obs, dtype=np.int16)
@@ -441,9 +466,9 @@ class EnvironmentTSN(gym.Env):
         # If it is training, a random VNF has to be generated
         if TRAINING_IF is True:
             # Generate a random VNF
-            # self.current_vnf = VNF(list(self.graph.nodes)).get_request()
-            # self.current_vnf = VNF(options['route']).get_request()
-            self.current_vnf = VNF(None).get_request()
+            # self.current_vnf = VNF(list(self.graph.nodes), False).get_request()
+            # self.current_vnf = VNF(options['route'], False).get_request()
+            self.current_vnf = VNF(None, False).get_request()
         else:
             # Set the first VNF as the one to process
             self.current_vnf = self.vnf_list[self.vnf_id]
@@ -484,6 +509,7 @@ class EnvironmentTSN(gym.Env):
 
         if action[0] >= len(self.edges_info):
             self.terminated = True
+
             info = {'previous_node': -1, 'exit_code': -3}
         elif truncated:
             info = {'previous_node': -1, 'exit_code': -4}
@@ -500,6 +526,9 @@ class EnvironmentTSN(gym.Env):
                 if self.current_vnf['destination'] == self.current_node:
                     self.terminated = True
                     self.logger.info('[I] Reached destination!')
+                if self.current_node > 7:
+                    self.terminated = True
+                    self.logger.info('[I] Exited from TSN zone')
 
             # Update reward of current episode
             exit_code = self.reward_function(action)
@@ -518,7 +547,6 @@ class EnvironmentTSN(gym.Env):
 
         if ENV_LOG_LEVEL == 10:
             self.logger.debug('[D] STEP. info = ' + str(info) + ', terminated = ' + str(self.terminated) +
-                              ', truncated = ' + str(truncated) +
                               ', reward = ' + str(self.reward) +
                               ', obs = ' + str(obs[0:4]))
             for i in range(3):
