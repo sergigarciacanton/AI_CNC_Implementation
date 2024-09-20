@@ -13,13 +13,13 @@ class VNF:
             else:
                 while True:
                     self.target = random.choice(graph_nodes)
-                    if self.target > 7:
+                    if (self.target > 7 and self.target != 9) or self.target == 1 or self.target == 5:
                         break
                 self.source = 9
         elif graph_nodes is not None and len(graph_nodes) == 2:
             self.source, self.target = graph_nodes[0], graph_nodes[1]
         else:
-            self.source, self.target = 9, 11  # Source and destination of stream
+            self.source, self.target = 11, 1  # Source and destination of stream
         self.length = random.choice(VNF_LENGTH)  # Length of packets to send [bytes]
         self.period = random.choice(VNF_PERIOD)  # Periodicity of sent packets [ms]
         self.max_delay = random.choice(VNF_DELAY)  # Maximum acceptable delay [ms]

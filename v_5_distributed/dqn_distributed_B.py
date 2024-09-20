@@ -14,7 +14,7 @@ import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
 from config_distributed import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES_B, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
-    PLOTS_PATH, SAVE_PLOTS, TIMESTEPS_LIMIT
+    PLOTS_PATH, SAVE_PLOTS
 import os
 import logging
 from colorlog import ColoredFormatter
@@ -158,12 +158,12 @@ def save_evaluation(evaluation_num: int, obs: np.ndarray, reward: float, done: b
 
 
 def get_action_space(obs, previous_node):
-    current_node = obs[1]
+    current_node = obs[2]
 
     # Get those actions that are feasible: just useful positions of useful edges
     action_space = []
     a = 0
-    i = 4
+    i = 5
     for e in TRAINING_EDGES_B:
         if current_node == e[0]:
             for _ in range(16 * DIVISION_FACTOR):

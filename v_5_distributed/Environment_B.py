@@ -5,32 +5,27 @@ import networkx as nx
 import logging
 import sys
 from colorlog import ColoredFormatter
-import time
 from gymnasium.core import ObsType
 from gymnasium.spaces import Discrete
 from vnf_generator_B import VNF
 import numpy as np
 from itertools import chain
-from config_distributed import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, TRAINING_IF, \
-    TRAINING_NODES_B, TRAINING_EDGES_B, BACKGROUND_STREAMS, TIMESTEPS_LIMIT
+from config_distributed import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, \
+    TRAINING_NODES_B, TRAINING_EDGES_B, BACKGROUND_STREAMS
 
 
 class EnvironmentB(gym.Env):
     # Environment initialization
     def __init__(self, log_file_id):
         self.graph = nx.DiGraph()  # Graph containing the network topology. Training topology is given at config.py
-        self.ip_addresses = {}  # Dict containing the IP addresses of all nodes in the network. Not used if training
-        self.vnf_list = {}  # Dict of current VNFs generated for real streams and their states
         self.background_traffic = {}  # Dict of current VNFs generated for background traffic and their states
         self.edges_info = {}  # Dict containing all edges' information: source, destination, delay and schedule
         self.hyperperiod = None  # Time duration of a hyperperiod [ms]. Set as maximum VNF period (see config.py)
         self.reward = 0  # Cumulative reward of the episode
-        self.remaining_timesteps = None
+        # self.remaining_timesteps = None
         self.optimal_positions = True  # Set to false if agent chooses non-optimal positions. Used in reward_function
         self.terminated = False  # Check whether episode has ended
-        self.ready = False  # False until topology and VNFs have been received by RabbitMQ. True if training
         self.current_vnf = None  # Current VNF that is being served. Iterates over vnf_list when not training
-        self.vnf_id = 0  # Current VNF ID that is being scheduled
         self.current_node = None  # Current node where the current stream is located at
         self.current_delay = None  # Current calculated delay for the current stream to follow the calculated path [ms]
         self.current_position = None
@@ -44,10 +39,9 @@ class EnvironmentB(gym.Env):
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
         self.logger.addHandler(stream_handler)
-        logging.getLogger('pika').setLevel(logging.WARNING)
 
         # Init procedure: get network topology and VNFs list
-        self.logger.info('[I] Training enabled. Reading topology from config...')
+        self.logger.info('[I] Reading topology from config...')
         # Generate graph adding given topology (see config.py)
         self.graph.add_nodes_from(TRAINING_NODES_B)
         for edge, data in TRAINING_EDGES_B.items():
@@ -67,18 +61,14 @@ class EnvironmentB(gym.Env):
                                             delay=delay['delay'])
             id_edge += 1
 
-        # Ready to work. Observation and action spaces can now be defined
-        self.ready = True
-
-        self.logger.info('[I] Environment ready to operate')
-
         # Observation space
-        num_obs_features = 4 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
-        # self.observation_space = MultiDiscrete(np.array([1] * num_obs_features), dtype=np.int32)
+        num_obs_features = 5 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
         self.observation_space_B = Discrete(num_obs_features)
 
         # Action space
         self.action_space_B = Discrete(len(TRAINING_EDGES_B) * self.hyperperiod * DIVISION_FACTOR + 1)
+
+        self.logger.info('[I] Environment ready to operate')
 
     # Returns the graph. Called during agent's initialization
     def get_graph(self):
@@ -120,7 +110,7 @@ class EnvironmentB(gym.Env):
                             num_abortions += 1
                             i -= 1
                             if num_abortions >= 1000:
-                                # If looping too much, network has collapsed. Stop execution
+                                # If looping too much, network has collapsed. Stop creating background traffic
                                 self.logger.warning(
                                     '[!] Background traffic could not be allocated! Ask for less '
                                     'background streams (see config.py --> BACKGROUND_STREAMS)')
@@ -161,7 +151,7 @@ class EnvironmentB(gym.Env):
     # Try to allocate resources for a real stream. If not possible, terminate episode. Called during step
     def schedule_stream(self, action):
         # Check if scheduling is possible. All time slots of the given position must have enough space
-        # If scheduling is possible, assign resources. Otherwise, terminate episode
+        # If scheduling is possible, assign resources. Otherwise, (should never happen) terminate episode
         if self.get_position_availability(self.edges_info[action[0]]['schedule'],
                                           action[1],
                                           self.current_vnf['period']
@@ -188,7 +178,8 @@ class EnvironmentB(gym.Env):
         return position_availabilities
 
     # Finds the availability of a position, which is the minimum availability of the slots of that position
-    # Called during generate_background_traffic, schedule_background_stream and schedule_stream
+    # Called during generate_background_traffic, get_edge_positions, schedule_background_stream, schedule_stream,
+    # get_edge_positions_real and get_observation
     # Returns the availability of a given position for a given period
     def get_position_availability(self, schedule, position, period):
         min_availability = SLOT_CAPACITY
@@ -199,7 +190,7 @@ class EnvironmentB(gym.Env):
             slot += period
         return min_availability
 
-    # Updates the reward of the current episode
+    # Updates the reward of the current episode. Called during step
     def reward_function(self, action):
         if action[0] < len(self.edges_info):
             # Compute availabilities of all positions
@@ -207,30 +198,27 @@ class EnvironmentB(gym.Env):
 
             # Not take into account the load of the current VNF
             position_availabilities[action[1]] += self.current_vnf['length']
-            # print('Current position: ' + str(self.current_position))
 
+            # Calculate optimal position to take and subtract difference with selected position.
+            # Decrease reward by the calculated difference
             for i in range(self.current_vnf['period']):
                 eval_position = (self.current_position + i) % self.current_vnf['period']
-                # print('Evaluation of position: ' + str(eval_position))
                 if self.current_vnf['length'] <= position_availabilities[eval_position]:
-                    # print('Optimal position: ' + str(eval_position))
-                    # print('Selected position: ' + str(action[1]))
                     if eval_position != action[1]:
-                        # print('Different positions found!')
                         if action[1] < eval_position:
                             position = action[1] + self.current_vnf['period']
                         else:
                             position = action[1]
-                        # print('Reward to subtract: ' + str((position - eval_position)))
                         self.reward -= (position - eval_position)
                         self.optimal_positions = False
                     break
 
             # Decrease the reward by the distance from the current node to the target node (in delay terms)
-            if self.current_node >= 8:
-                cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
-                                                  target=self.current_vnf['destination'])
-                self.reward -= cur_len
+            # if self.current_node >= 8:
+            # cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
+            #                                   target=self.current_vnf['destination'])
+            # self.reward -= cur_len
+            self.reward -= self.edges_info[action[0]]['delay']
 
         # If the episode is ended, check why
         if self.terminated:
@@ -268,20 +256,23 @@ class EnvironmentB(gym.Env):
                         and self.optimal_positions is False:
                     self.reward = 0
                     return 3
+            # If destination has not been reached, the TSN flow has left the TSN zone. Check how
             else:
+                # If scheduling was optimal, increase reward by 150
                 if nx.dijkstra_path_length(self.graph,
                                            self.current_vnf['source'],
                                            self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
                     'max_delay'] \
                         and self.optimal_positions is True and self.current_vnf['destination'] < 8:
                     self.reward += 150
-                # If neither routing nor scheduling were optimal leave the reward as 0
+                # If scheduling was not optimal leave the reward as 0
                 elif nx.dijkstra_path_length(self.graph,
                                              self.current_vnf['source'],
                                              self.current_vnf['destination']) < self.current_delay <= self.current_vnf[
                     'max_delay'] \
                         and self.optimal_positions is False and self.current_vnf['destination'] < 8:
                     self.reward = 0
+                # If destination of the TSN flow is inside the TSN zone, decrease reward by 100
                 elif self.current_vnf['destination'] > 7:
                     self.reward -= 100
                 return 4
@@ -302,7 +293,8 @@ class EnvironmentB(gym.Env):
         for edge_id, edge in self.edges_info.items():
             # Extract just the state of the edges whose source is the current node
             if edge['source'] == self.current_node:
-                # Compute position traffic loads. Minimum percentage of free bytes for all slots of each position
+                # Compute position availabilities (vectors that show, for each edge, its positions' availabilities)
+                # 1 --> Position available, 0 --> Position not available
                 slot_loads = [0] * self.hyperperiod * DIVISION_FACTOR
                 if len(self.route) < 2:
                     for c in range(self.current_vnf['period']):
@@ -320,13 +312,17 @@ class EnvironmentB(gym.Env):
                             slot_loads[c] = 0
                 st[edge_id] = slot_loads
         st_vec = list(chain.from_iterable(st.values()))
+
+        # In case that the current node has less than 3 neighbors, fill the vector with padding zeros
         while len(st_vec) < (3 * self.hyperperiod * DIVISION_FACTOR):
             st_vec.append(0)
 
+        # Calculate remaining delay, which is the difference between the maximum stated at the VNF and the current sum
         remaining_delay = self.current_vnf['max_delay'] - self.current_delay
 
         # Merge all data into a list
-        obs = [self.current_vnf['destination']] \
+        obs = [self.current_vnf['source']] \
+              + [self.current_vnf['destination']] \
               + [self.current_node] \
               + [self.current_position] \
               + [remaining_delay] \
@@ -340,7 +336,7 @@ class EnvironmentB(gym.Env):
               options: dict[str, Any] | None = None) -> tuple[ObsType, dict[str, Any]]:
         super().reset(seed=seed)
 
-        # Reset terminated, route, schedule, reward, remaining time steps and elapsed time
+        # Reset terminated, route, schedule, reward, remaining time steps and current delay
         for e in self.edges_info.values():
             e['schedule'] = [SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR
         self.route = []
@@ -349,23 +345,12 @@ class EnvironmentB(gym.Env):
         self.current_position = 0
         self.optimal_positions = True
         self.reward = 0
-        self.remaining_timesteps = TIMESTEPS_LIMIT
+        # self.remaining_timesteps = TIMESTEPS_LIMIT
 
-        # Wait until being ready to work.
-        # In training mode, this is skipped. Otherwise, topology and VNFs must be received before continuing
-        while not self.ready:
-            time.sleep(0.001)
-
-        # If the agent is not training, the current VNF has to be selected from vnf_list
-        # If it is training, a random VNF has to be generated
-        if TRAINING_IF is True:
-            # Generate a random VNF
-            # self.current_vnf = VNF(list(self.graph.nodes), False).get_request()
-            # self.current_vnf = VNF(options['route'], False).get_request()
-            self.current_vnf = VNF(None, False).get_request()
-        else:
-            # Set the first VNF as the one to process
-            self.current_vnf = self.vnf_list[self.vnf_id]
+        # Generate a random VNF
+        # self.current_vnf = VNF(list(self.graph.nodes), False).get_request()
+        # self.current_vnf = VNF(options['route'], False).get_request()
+        self.current_vnf = VNF(None, False).get_request()
 
         self.logger.debug('[D] VNF: ' + str(self.current_vnf))
 
@@ -377,16 +362,15 @@ class EnvironmentB(gym.Env):
         self.background_traffic = {}
         self.generate_background_traffic()
         self.logger.info('[I] Generated ' + str(len(self.background_traffic)) + ' background streams')
-        # print(self.edges_info)
 
         # Acquire data to return to the agent
         obs = self.get_observation()
         info = {'previous_node': -1}
         if ENV_LOG_LEVEL == 10:
-            self.logger.debug('[D] RESET. info = ' + str(info) + ', obs = ' + str(obs[0:4]))
+            self.logger.debug('[D] RESET. info = ' + str(info) + ', obs = ' + str(obs[0:5]))
             for i in range(3):
                 self.logger.debug('[D] RESET. Edge ' + str(i) + ' |  position availabilities: ' +
-                                  str(obs[4 + (i * (self.hyperperiod * DIVISION_FACTOR)):4 + (
+                                  str(obs[5 + (i * (self.hyperperiod * DIVISION_FACTOR)):5 + (
                                           (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         return obs, info
 
@@ -397,16 +381,16 @@ class EnvironmentB(gym.Env):
         self.logger.info('[I] STEP. Action: ' + str(action_int) + ' ' + str(action))
 
         # Subtract 1 to the remaining time steps
-        self.remaining_timesteps -= 1
-        # Truncate episode in case it is becoming too large (maybe due to network loops)
-        truncated = self.remaining_timesteps < 0
+        # self.remaining_timesteps -= 1
+        # # Truncate episode in case it is becoming too large (maybe due to network loops)
+        # truncated = self.remaining_timesteps < 0
 
         if action[0] >= len(self.edges_info):
             self.terminated = True
 
             info = {'previous_node': -1, 'exit_code': -3}
-        elif truncated:
-            info = {'previous_node': -1, 'exit_code': -4}
+        # elif truncated:
+        #     info = {'previous_node': -1, 'exit_code': -4}
         else:
             # Try to schedule the stream given the action to perform
             self.schedule_stream(action)
@@ -435,21 +419,17 @@ class EnvironmentB(gym.Env):
         # Acquire data to return to the agent
         obs = self.get_observation()
 
-        # Skip to next VNF in case of ending episode (just needed when not training)
-        if self.terminated is True and TRAINING_IF is False:
-            self.vnf_id += 1
-
         if ENV_LOG_LEVEL == 10:
             self.logger.debug('[D] STEP. info = ' + str(info) + ', terminated = ' + str(self.terminated) +
                               ', reward = ' + str(self.reward) +
-                              ', obs = ' + str(obs[0:4]))
+                              ', obs = ' + str(obs[0:5]))
             for i in range(3):
                 self.logger.debug('[D] STEP. Edge ' + str(i) + ' |  position availabilities: ' +
-                                  str(obs[4 + (i * (self.hyperperiod * DIVISION_FACTOR)):4 + (
+                                  str(obs[5 + (i * (self.hyperperiod * DIVISION_FACTOR)):5 + (
                                           (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         if self.terminated:
             self.logger.info('[I] Ending episode...\n')
-        return obs, self.reward, self.terminated, truncated, info
+        return obs, self.reward, self.terminated, False, info
 
 # env = EnvironmentTSN()
 # print('Hyperperiod:', env.hyperperiod)

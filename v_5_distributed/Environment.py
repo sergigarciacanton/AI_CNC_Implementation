@@ -5,35 +5,29 @@ import networkx as nx
 import logging
 import sys
 from colorlog import ColoredFormatter
-import time
 from gymnasium.core import ObsType
 from gymnasium.spaces import Discrete
-
 from vnf_generator import VNF
 import numpy as np
 from itertools import chain
-from config_distributed import (ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, TRAINING_IF,
+from config_distributed import (ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR,
                                 TRAINING_EDGES, TRAINING_NODES, TRAINING_EDGES_A, TRAINING_NODES_A, TRAINING_EDGES_B,
-                                TRAINING_NODES_B, BACKGROUND_STREAMS, TIMESTEPS_LIMIT)
+                                TRAINING_NODES_B, BACKGROUND_STREAMS)
 
 
 class EnvironmentTSN(gym.Env):
     # Environment initialization
     def __init__(self, log_file_id):
         self.graph = nx.DiGraph()  # Graph containing the network topology. Training topology is given at config.py
-        self.ip_addresses = {}  # Dict containing the IP addresses of all nodes in the network. Not used if training
-        self.vnf_list = {}  # Dict of current VNFs generated for real streams and their states
         self.background_traffic = {}  # Dict of current VNFs generated for background traffic and their states
         self.edges_info_A = {}  # Dict containing all edges' information: source, destination, delay and schedule
         self.edges_info_B = {}  # Dict containing all edges' information: source, destination, delay and schedule
         self.hyperperiod = None  # Time duration of a hyperperiod [ms]. Set as maximum VNF period (see config.py)
         self.reward = 0  # Cumulative reward of the episode
-        self.remaining_timesteps = None
+        # self.remaining_timesteps = None
         self.optimal_positions = True  # Set to false if agent chooses non-optimal positions. Used in reward_function
         self.terminated = False  # Check whether episode has ended
-        self.ready = False  # False until topology and VNFs have been received by RabbitMQ. True if training
         self.current_vnf = None  # Current VNF that is being served. Iterates over vnf_list when not training
-        self.vnf_id = 0  # Current VNF ID that is being scheduled
         self.current_node = None  # Current node where the current stream is located at
         self.current_delay = None  # Current calculated delay for the current stream to follow the calculated path [ms]
         self.current_position = None
@@ -50,7 +44,7 @@ class EnvironmentTSN(gym.Env):
         self.logger.addHandler(stream_handler)
 
         # Init procedure: get network topology and VNFs list
-        self.logger.info('[I] Training enabled. Reading topology from config...')
+        self.logger.info('[I] Reading topology from config...')
         # Generate graph adding given topology (see config.py)
         self.graph.add_nodes_from(TRAINING_NODES)
         for edge, data in TRAINING_EDGES.items():
@@ -76,16 +70,10 @@ class EnvironmentTSN(gym.Env):
                                               delay=delay['delay'])
             id_edge += 1
 
-        # Ready to work. Observation and action spaces can now be defined
-        self.ready = True
-
-        while self.ready is False:
-            time.sleep(1)
-
         self.logger.info('[I] Environment ready to operate')
 
         # Observation space
-        num_obs_features = 4 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
+        num_obs_features = 5 + ((self.hyperperiod * DIVISION_FACTOR) * 3)  # Num of obs features
         self.observation_space_A = Discrete(num_obs_features)
         self.observation_space_B = Discrete(num_obs_features)
 
@@ -341,10 +329,8 @@ class EnvironmentTSN(gym.Env):
                             self.optimal_positions = False
                         break
 
-                # Decrease the reward by the distance from the current node to the target node (in delay terms)
-                cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
-                                                  target=self.island_destination)
-                self.reward -= cur_len
+                # Decrease the reward by the delay of the selected edge
+                self.reward -= self.edges_info_A[action[0]]['delay']
 
             # If the episode is ended, check why
             if self.terminated:
@@ -416,10 +402,8 @@ class EnvironmentTSN(gym.Env):
                             self.optimal_positions = False
                         break
 
-                # Decrease the reward by the distance from the current node to the target node (in delay terms)
-                cur_len = nx.dijkstra_path_length(self.graph, source=self.current_node,
-                                                  target=self.island_destination)
-                self.reward -= cur_len
+                # Decrease the reward by the delay of the selected edge
+                self.reward -= self.edges_info_B[action[0]]['delay']
 
             # If the episode is ended, check why
             if self.terminated:
@@ -503,11 +487,12 @@ class EnvironmentTSN(gym.Env):
             remaining_delay = self.current_vnf['max_delay'] - self.current_delay
 
             # Merge all data into a list
-            obs = [self.island_destination] \
-                  + [self.current_node] \
-                  + [self.current_position] \
-                  + [remaining_delay] \
-                  + st_vec
+            obs = ([self.current_vnf['source']]
+                   + [self.island_destination]
+                   + [self.current_node]
+                   + [self.current_position]
+                   + [remaining_delay]
+                   + st_vec)
 
             # Convert state list to a numpy array
             obs = np.array(obs, dtype=np.int16)
@@ -540,7 +525,8 @@ class EnvironmentTSN(gym.Env):
             remaining_delay = self.current_vnf['max_delay'] - self.current_delay
 
             # Merge all data into a list
-            obs = [self.island_destination] \
+            obs = [self.current_vnf['source']] \
+                  + [self.island_destination] \
                   + [self.current_node] \
                   + [self.current_position] \
                   + [remaining_delay] \
@@ -565,23 +551,12 @@ class EnvironmentTSN(gym.Env):
         self.current_position = 0
         self.optimal_positions = True
         self.reward = 0
-        self.remaining_timesteps = TIMESTEPS_LIMIT
+        # self.remaining_timesteps = TIMESTEPS_LIMIT
 
-        # Wait until being ready to work.
-        # In training mode, this is skipped. Otherwise, topology and VNFs must be received before continuing
-        while not self.ready:
-            time.sleep(0.001)
-
-        # If the agent is not training, the current VNF has to be selected from vnf_list
-        # If it is training, a random VNF has to be generated
-        if TRAINING_IF is True:
-            # Generate a random VNF
-            # self.current_vnf = VNF(list(self.graph.nodes), False).get_request()
-            # self.current_vnf = VNF(options['route'], False).get_request()
-            self.current_vnf = VNF(None).get_request()
-        else:
-            # Set the first VNF as the one to process
-            self.current_vnf = self.vnf_list[self.vnf_id]
+        # Generate a random VNF
+        # self.current_vnf = VNF(list(self.graph.nodes), False).get_request()
+        # self.current_vnf = VNF(options['route'], False).get_request()
+        self.current_vnf = VNF(None).get_request()
 
         self.logger.debug('[D] VNF: ' + str(self.current_vnf))
 
@@ -600,10 +575,10 @@ class EnvironmentTSN(gym.Env):
         obs = self.get_observation()
         info = {'previous_node': -1}
         if ENV_LOG_LEVEL == 10:
-            self.logger.debug('[D] RESET. info = ' + str(info) + ', obs = ' + str(obs[0:4]))
+            self.logger.debug('[D] RESET. info = ' + str(info) + ', obs = ' + str(obs[0:5]))
             for i in range(3):
                 self.logger.debug('[D] RESET. Edge ' + str(i) + ' |  position availabilities: ' +
-                                  str(obs[4 + (i * (self.hyperperiod * DIVISION_FACTOR)):4 + (
+                                  str(obs[5 + (i * (self.hyperperiod * DIVISION_FACTOR)):5 + (
                                           (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         return obs, info
 
@@ -613,17 +588,15 @@ class EnvironmentTSN(gym.Env):
             int(action_int / (self.hyperperiod * DIVISION_FACTOR)), action_int % (self.hyperperiod * DIVISION_FACTOR))
         self.logger.info('[I] STEP. Action: ' + str(action_int) + ' ' + str(action))
 
-        # Subtract 1 to the remaining time steps
-        self.remaining_timesteps -= 1
         # Truncate episode in case it is becoming too large (maybe due to network loops)
-        truncated = self.remaining_timesteps < 0
+        # truncated = self.remaining_timesteps < 0
 
         if self.current_node <= 7:
             if action[0] >= len(self.edges_info_A):
                 self.terminated = True
                 info = {'previous_node': -1, 'exit_code': -3}
-            elif truncated:
-                info = {'previous_node': -1, 'exit_code': -4}
+            # elif truncated:
+            #     info = {'previous_node': -1, 'exit_code': -4}
             else:
                 # Try to schedule the stream given the action to perform
                 self.schedule_stream(action)
@@ -651,8 +624,8 @@ class EnvironmentTSN(gym.Env):
             if action[0] >= len(self.edges_info_B):
                 self.terminated = True
                 info = {'previous_node': -1, 'exit_code': -3}
-            elif truncated:
-                info = {'previous_node': -1, 'exit_code': -4}
+            # elif truncated:
+            #     info = {'previous_node': -1, 'exit_code': -4}
             else:
                 # Try to schedule the stream given the action to perform
                 self.schedule_stream(action)
@@ -680,10 +653,6 @@ class EnvironmentTSN(gym.Env):
         # Acquire data to return to the agent
         obs = self.get_observation()
 
-        # Skip to next VNF in case of ending episode (just needed when not training)
-        if self.terminated is True and TRAINING_IF is False:
-            self.vnf_id += 1
-
         if ENV_LOG_LEVEL == 10:
             self.logger.debug('[D] STEP. info = ' + str(info) + ', terminated = ' + str(self.terminated) +
                               ', reward = ' + str(self.reward) +
@@ -694,7 +663,7 @@ class EnvironmentTSN(gym.Env):
                                           (i + 1) * (self.hyperperiod * DIVISION_FACTOR))]))
         if self.terminated:
             self.logger.info('[I] Ending episode...\n')
-        return obs, self.reward, self.terminated, truncated, info
+        return obs, self.reward, self.terminated, False, info
 
 
 # env = EnvironmentTSN('test')

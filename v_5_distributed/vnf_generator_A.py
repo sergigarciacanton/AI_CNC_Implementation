@@ -19,7 +19,7 @@ class VNF:
         elif graph_nodes is not None and len(graph_nodes) == 2:
             self.source, self.target = graph_nodes[0], graph_nodes[1]
         else:
-            self.source, self.target = 6, 9  # Source and destination of stream
+            self.source, self.target = 1, 6  # Source and destination of stream
         self.length = random.choice(VNF_LENGTH)  # Length of packets to send [bytes]
         self.period = random.choice(VNF_PERIOD)  # Periodicity of sent packets [ms]
         self.max_delay = random.choice(VNF_DELAY)  # Maximum acceptable delay [ms]
