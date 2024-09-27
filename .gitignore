@@ -8,6 +8,8 @@ venv/
 .idea/
 __pycache__/
 
+notes.txt
+
 *.log
 *.pt
 *.png
