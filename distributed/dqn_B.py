@@ -13,8 +13,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
-from config import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES_B, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
-    PLOTS_PATH, SAVE_PLOTS
+from config import MODEL_PATH, SEED, DIVISION_FACTOR, EDGES_B, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
+    PLOTS_PATH, SAVE_PLOTS, REPLAY_BUFFER_SIZE, BATCH_SIZE, MAX_EPSILON, EPSILON_DECAY, MIN_EPSILON, TARGET_UPDATE, \
+    GAMMA, LEARNING_RATE, TAU
 import os
 import logging
 from colorlog import ColoredFormatter
@@ -164,7 +165,7 @@ def get_action_space(obs, previous_node):
     action_space = []
     a = 0
     i = 5
-    for e in TRAINING_EDGES_B:
+    for e in EDGES_B:
         if current_node == e[0]:
             for _ in range(16 * DIVISION_FACTOR):
                 if obs[i] == 1:
@@ -279,16 +280,6 @@ class DQNAgentB:
     def __init__(
             self,
             env: gym.Env,
-            replay_buffer_size: int = 2500,
-            batch_size: int = 16,
-            target_update: int = 400,
-            epsilon_decay: float = 1 / 55000,
-            seed=None,
-            max_epsilon: float = 1.0,
-            min_epsilon: float = 0.001,
-            gamma: float = 0.9,
-            learning_rate: float = 0.001,
-            tau: float = 0.001,
             log_file_id: str = 'dqn'):
 
         # Spaces
@@ -298,17 +289,17 @@ class DQNAgentB:
 
         # Attributes
         self.env = env
-        self.replay_buffer_size = ReplayBuffer(obs_space, replay_buffer_size, batch_size)
-        self.batch_size = batch_size
-        self.epsilon = max_epsilon
-        self.epsilon_decay = epsilon_decay
-        self.seed = seed
-        self.max_epsilon = max_epsilon
-        self.min_epsilon = min_epsilon
-        self.update_target_every_steps = target_update
-        self.gamma = gamma
-        self.learning_rate = learning_rate
-        self.tau = tau
+        self.replay_buffer_size = ReplayBuffer(obs_space, REPLAY_BUFFER_SIZE, BATCH_SIZE)
+        self.batch_size = BATCH_SIZE
+        self.epsilon = MAX_EPSILON
+        self.epsilon_decay = EPSILON_DECAY
+        self.seed = SEED
+        self.max_epsilon = MAX_EPSILON
+        self.min_epsilon = MIN_EPSILON
+        self.update_target_every_steps = TARGET_UPDATE
+        self.gamma = GAMMA
+        self.learning_rate = LEARNING_RATE
+        self.tau = TAU
         self.evaluation = 1
 
         # Logging settings

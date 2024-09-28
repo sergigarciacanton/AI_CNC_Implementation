@@ -3,6 +3,8 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 from typing import List
+
+from distributed.config import MAX_EPSILON
 from dqn_A import DQNAgentA
 from dqn_B import DQNAgentB
 
@@ -13,59 +15,20 @@ class DQNAgent:
     def __init__(
             self,
             env: gym.Env,
-            replay_buffer_size: int = 2500,
-            batch_size: int = 16,
-            target_update: int = 400,
-            epsilon_decay: float = 1 / 55000,
-            seed=None,
-            max_epsilon: float = 1.0,
-            min_epsilon: float = 0.001,
-            gamma: float = 0.9,
-            learning_rate: float = 0.001,
-            tau: float = 0.001,
             log_file_id: str = 'dqn'):
 
         # Attributes
         self.env = env
-        self.batch_size = batch_size
-        self.epsilon = max_epsilon
-        self.epsilon_decay = epsilon_decay
-        self.seed = seed
-        self.max_epsilon = max_epsilon
-        self.min_epsilon = min_epsilon
-        self.update_target_every_steps = target_update
-        self.gamma = gamma
-        self.learning_rate = learning_rate
-        self.tau = tau
+        self.epsilon = MAX_EPSILON
         self.evaluation = 1
 
         self.agent_A = DQNAgentA(
             env=env,
-            replay_buffer_size=replay_buffer_size,
-            batch_size=batch_size,
-            target_update=target_update,
-            epsilon_decay=epsilon_decay,
-            seed=None,
-            max_epsilon=max_epsilon,
-            min_epsilon=min_epsilon,
-            gamma=gamma,
-            learning_rate=learning_rate,
-            tau=tau,
             log_file_id=log_file_id + '_A'
         )
 
         self.agent_B = DQNAgentB(
             env=env,
-            replay_buffer_size=replay_buffer_size,
-            batch_size=batch_size,
-            target_update=target_update,
-            epsilon_decay=epsilon_decay,
-            seed=None,
-            max_epsilon=max_epsilon,
-            min_epsilon=min_epsilon,
-            gamma=gamma,
-            learning_rate=learning_rate,
-            tau=tau,
             log_file_id=log_file_id + '_B'
         )
 

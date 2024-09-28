@@ -4,7 +4,6 @@ import time
 from datetime import datetime, timezone, timedelta
 import gymnasium as gym
 import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import pandas as pd
 import torch
@@ -14,7 +13,8 @@ import torch.optim as optim
 from IPython.display import clear_output
 from typing import Dict, List, Tuple
 from config import MODEL_PATH, SEED, DIVISION_FACTOR, TRAINING_EDGES, DQN_LOG_LEVEL, DQN_LOG_FILE_NAME, \
-    PLOTS_PATH, SAVE_PLOTS, TIMESTEPS_LIMIT
+    PLOTS_PATH, SAVE_PLOTS, REPLAY_BUFFER_SIZE, BATCH_SIZE, MAX_EPSILON, EPSILON_DECAY, MIN_EPSILON, TARGET_UPDATE, \
+    GAMMA, LEARNING_RATE, TAU
 import os
 import logging
 from colorlog import ColoredFormatter
@@ -279,16 +279,6 @@ class DQNAgent:
     def __init__(
             self,
             env: gym.Env,
-            replay_buffer_size: int = 2500,
-            batch_size: int = 16,
-            target_update: int = 400,
-            epsilon_decay: float = 1 / 55000,
-            seed=None,
-            max_epsilon: float = 1.0,
-            min_epsilon: float = 0.001,
-            gamma: float = 0.9,
-            learning_rate: float = 0.001,
-            tau: float = 0.001,
             log_file_id: str = 'dqn'):
 
         # Spaces
@@ -298,17 +288,17 @@ class DQNAgent:
 
         # Attributes
         self.env = env
-        self.replay_buffer_size = ReplayBuffer(obs_space, replay_buffer_size, batch_size)
-        self.batch_size = batch_size
-        self.epsilon = max_epsilon
-        self.epsilon_decay = epsilon_decay
-        self.seed = seed
-        self.max_epsilon = max_epsilon
-        self.min_epsilon = min_epsilon
-        self.update_target_every_steps = target_update
-        self.gamma = gamma
-        self.learning_rate = learning_rate
-        self.tau = tau
+        self.replay_buffer_size = ReplayBuffer(obs_space, REPLAY_BUFFER_SIZE, BATCH_SIZE)
+        self.batch_size = BATCH_SIZE
+        self.epsilon = MAX_EPSILON
+        self.epsilon_decay = EPSILON_DECAY
+        self.seed = SEED
+        self.max_epsilon = MAX_EPSILON
+        self.min_epsilon = MIN_EPSILON
+        self.update_target_every_steps = TARGET_UPDATE
+        self.gamma = GAMMA
+        self.learning_rate = LEARNING_RATE
+        self.tau = TAU
         self.evaluation = 1
 
         # Logging settings
@@ -318,7 +308,6 @@ class DQNAgent:
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(ColoredFormatter('%(log_color)s%(message)s'))
         self.logger.addHandler(stream_handler)
-        logging.getLogger('pika').setLevel(logging.WARNING)
 
         # Initialize UPC scenario graph
         self.graph = env.get_graph()
@@ -781,7 +770,6 @@ class DQNAgent:
         num_lost = 0
         num_no_resources = 0
         num_delayed = 0
-        # num_bad_schedule = 0
         num_arrived = 0
         num_arrived_wo_scheduling = 0
         num_perfect = 0
@@ -813,8 +801,6 @@ class DQNAgent:
                         num_arrived += 1
                     elif exit_code == -1:
                         num_delayed += 1
-                    # elif exit_code == -2:
-                    #     num_bad_schedule += 1
                     elif exit_code == -3:
                         num_no_resources += 1
                     elif exit_code == -4:
@@ -833,7 +819,6 @@ class DQNAgent:
         self.logger.info(f'[I] Number of episodes where flow reached its target with routing faults: {num_arrived_wo_routing}')
         self.logger.info(f'[I] Number of episodes where flow reached its target with schedule faults: {num_arrived_wo_scheduling}')
         self.logger.info(f'[I] Number of episodes where flow reached its target with routing and scheduling faults: {num_arrived}')
-        # self.logger.info(f'[I] Number of episodes where agent chose a bad position: {num_bad_schedule}')
         self.logger.info(f'[I] Number of episodes where flow delay exceeded the allowed maximum: {num_delayed}')
         self.logger.info(f'[I] Number of episodes where edges had not enough resources: {num_no_resources}')
         self.logger.info(f'[I] Number of episodes where flow has lost: {num_lost}')

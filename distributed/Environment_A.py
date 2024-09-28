@@ -11,7 +11,7 @@ from vnf_generator_A import VNF
 import numpy as np
 from itertools import chain
 from config import ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR, \
-    TRAINING_NODES_A, TRAINING_EDGES_A, BACKGROUND_STREAMS, ALL_ROUTES, VNF_PERIOD
+    NODES_A, EDGES_A, BACKGROUND_STREAMS, ALL_ROUTES, VNF_PERIOD
 
 
 class EnvironmentA(gym.Env):
@@ -46,8 +46,8 @@ class EnvironmentA(gym.Env):
 
         self.logger.info('[I] Reading topology from config...')
         # Generate graph adding given topology (see config.py)
-        self.graph.add_nodes_from(TRAINING_NODES_A)
-        for edge, data in TRAINING_EDGES_A.items():
+        self.graph.add_nodes_from(NODES_A)
+        for edge, data in EDGES_A.items():
             source, target = edge
             self.graph.add_edge(source, target, weight=data['delay'])
         self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
@@ -58,7 +58,7 @@ class EnvironmentA(gym.Env):
 
         # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
         id_edge = 0
-        for edge, delay in TRAINING_EDGES_A.items():
+        for edge, delay in EDGES_A.items():
             self.edges_info[id_edge] = dict(source=edge[0], destination=edge[1],
                                             schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
                                             delay=delay['delay'])
@@ -71,7 +71,7 @@ class EnvironmentA(gym.Env):
         self.observation_space_A = Discrete(num_obs_features)
 
         # Action space
-        self.action_space_A = Discrete(len(TRAINING_EDGES_A) * self.hyperperiod * DIVISION_FACTOR + 1)
+        self.action_space_A = Discrete(len(EDGES_A) * self.hyperperiod * DIVISION_FACTOR + 1)
 
     # Returns the graph. Called during agent's initialization
     def get_graph(self):

@@ -11,8 +11,8 @@ from vnf_generator import VNF
 import numpy as np
 from itertools import chain
 from config import (ENV_LOG_LEVEL, ENV_LOG_FILE_NAME, SLOT_CAPACITY, DIVISION_FACTOR,
-                    TRAINING_EDGES, TRAINING_NODES, TRAINING_EDGES_A, TRAINING_NODES_A, TRAINING_EDGES_B,
-                    TRAINING_NODES_B, BACKGROUND_STREAMS, ALL_ROUTES, VNF_PERIOD)
+                    EDGES, NODES, EDGES_A, NODES_A, EDGES_B,
+                    NODES_B, BACKGROUND_STREAMS, ALL_ROUTES, VNF_PERIOD)
 
 
 class EnvironmentTSN(gym.Env):
@@ -47,8 +47,8 @@ class EnvironmentTSN(gym.Env):
         # Init procedure: get network topology and VNFs list
         self.logger.info('[I] Reading topology from config...')
         # Generate graph adding given topology (see config.py)
-        self.graph.add_nodes_from(TRAINING_NODES)
-        for edge, data in TRAINING_EDGES.items():
+        self.graph.add_nodes_from(NODES)
+        for edge, data in EDGES.items():
             source, target = edge
             self.graph.add_edge(source, target, weight=data['delay'])
         self.logger.info('[I] Received network topology: ' + str(self.graph.number_of_nodes()) + ' nodes and '
@@ -59,13 +59,13 @@ class EnvironmentTSN(gym.Env):
 
         # Create edges info. Contains source, destination, delay and schedule (available bytes of each slot)
         id_edge = 0
-        for edge, delay in TRAINING_EDGES_A.items():
+        for edge, delay in EDGES_A.items():
             self.edges_info_A[id_edge] = dict(source=edge[0], destination=edge[1],
                                               schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
                                               delay=delay['delay'])
             id_edge += 1
         id_edge = 0
-        for edge, delay in TRAINING_EDGES_B.items():
+        for edge, delay in EDGES_B.items():
             self.edges_info_B[id_edge] = dict(source=edge[0], destination=edge[1],
                                               schedule=[SLOT_CAPACITY] * self.hyperperiod * DIVISION_FACTOR,
                                               delay=delay['delay'])
@@ -79,8 +79,8 @@ class EnvironmentTSN(gym.Env):
         self.observation_space_B = Discrete(num_obs_features)
 
         # Action space
-        self.action_space_A = Discrete(len(TRAINING_EDGES_A) * self.hyperperiod * DIVISION_FACTOR + 1)
-        self.action_space_B = Discrete(len(TRAINING_EDGES_B) * self.hyperperiod * DIVISION_FACTOR + 1)
+        self.action_space_A = Discrete(len(EDGES_A) * self.hyperperiod * DIVISION_FACTOR + 1)
+        self.action_space_B = Discrete(len(EDGES_B) * self.hyperperiod * DIVISION_FACTOR + 1)
 
     # Returns the graph. Called during agent's initialization
     def get_graph(self):
@@ -279,21 +279,21 @@ class EnvironmentTSN(gym.Env):
 
     # Gets the destination node ID for the TSN island where the current VNF is located
     def get_island_destination(self):
-        if self.current_node <= 7 and self.current_vnf['destination'] not in TRAINING_NODES_A:
+        if self.current_node <= 7 and self.current_vnf['destination'] not in NODES_A:
             path = nx.dijkstra_path(self.graph, self.current_node, self.current_vnf['destination'])
             i = 0
             while i < len(path):
-                if path[i] not in TRAINING_NODES_A:
+                if path[i] not in NODES_A:
                     self.island_destination = path[i - 1]
                     return
                 else:
                     i += 1
             self.island_destination = -1
-        elif self.current_node >= 8 and self.current_vnf['destination'] not in TRAINING_NODES_B:
+        elif self.current_node >= 8 and self.current_vnf['destination'] not in NODES_B:
             path = nx.dijkstra_path(self.graph, self.current_node, self.current_vnf['destination'])
             i = 0
             while i < len(path):
-                if path[i] not in TRAINING_NODES_B:
+                if path[i] not in NODES_B:
                     self.island_destination = path[i - 1]
                     return
                 else:

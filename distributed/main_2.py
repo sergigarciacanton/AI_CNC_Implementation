@@ -1,10 +1,11 @@
+from Environment import EnvironmentTSN
 from Environment_A import EnvironmentA
 from Environment_B import EnvironmentB
+from dqn import DQNAgent
 from dqn_A import DQNAgentA
 from dqn_B import DQNAgentB
-from config import BACKGROUND_STREAMS, VNF_LENGTH, VNF_PERIOD, VNF_DELAY
-from Environment import EnvironmentTSN
-from dqn import DQNAgent
+from config import BACKGROUND_STREAMS, VNF_LENGTH, VNF_PERIOD, VNF_DELAY, TRAINING_STEPS, ROUTE_EVALUATION_EPISODES, \
+    CUSTOM_EVALUATION_EPISODES, MONITOR_TRAINING
 
 main_id = 'dist_2'
 
@@ -26,7 +27,7 @@ if option == 0:
         log_file_id=main_id
     )
 
-    max_steps = 200000
+    max_steps = TRAINING_STEPS
     agent.logger.info('[I] Chose training model A')
     agent.logger.info('[I] Settings: time_steps = ' + str(max_steps) +
                       ' | epsilon = ' + str(agent.epsilon_decay) + ' | background flows = ' + str(BACKGROUND_STREAMS) +
@@ -36,7 +37,7 @@ if option == 0:
                       ' | learning rate = ' + str(agent.learning_rate) + ' | tau = ' + str(agent.tau) +
                       ' | vnf_len = ' + str(VNF_LENGTH) + ' | vnf_prd = ' + str(VNF_PERIOD) + ' | vnf_delay = ' + str(VNF_DELAY))
     agent.logger.info('[I] Extra info: ' + str(input('[*] Introduce any other setting data (just to print it): ')))
-    agent.train(max_steps=max_steps, monitor_training=10000, plotting_interval=max_steps)
+    agent.train(max_steps=max_steps, monitor_training=MONITOR_TRAINING, plotting_interval=max_steps)
 
 elif option == 1:
     ENV = EnvironmentB(main_id, False)
@@ -46,7 +47,7 @@ elif option == 1:
         log_file_id=main_id
     )
 
-    max_steps = 200000
+    max_steps = TRAINING_STEPS
     agent.logger.info('[I] Chose training model B')
     agent.logger.info('[I] Settings: time_steps = ' + str(max_steps) +
                       ' | epsilon = ' + str(agent.epsilon_decay) + ' | background flows = ' + str(BACKGROUND_STREAMS) +
@@ -56,7 +57,7 @@ elif option == 1:
                       ' | learning rate = ' + str(agent.learning_rate) + ' | tau = ' + str(agent.tau) +
                       ' | vnf_len = ' + str(VNF_LENGTH) + ' | vnf_prd = ' + str(VNF_PERIOD) + ' | vnf_delay = ' + str(VNF_DELAY))
     agent.logger.info('[I] Extra info: ' + str(input('[*] Introduce any other setting data (just to print it): ')))
-    agent.train(max_steps=max_steps, monitor_training=10000, plotting_interval=max_steps)
+    agent.train(max_steps=max_steps, monitor_training=MONITOR_TRAINING, plotting_interval=max_steps)
 
 elif option == 2:
     ENV = EnvironmentA(main_id, True)
@@ -66,10 +67,10 @@ elif option == 2:
         log_file_id=main_id
     )
 
-    agent.logger.info('[I] Chose evaluating custom model routes')
+    agent.logger.info('[I] Chose evaluating custom model A routes')
     routing_model_name = input('[*] Introduce the name of the model: ')
     agent.load_custom_model(routing_model_name)
-    agent.evaluate_routes(ENV, 100)
+    agent.evaluate_routes(ENV, ROUTE_EVALUATION_EPISODES)
 
 elif option == 3:
     ENV = EnvironmentA(main_id, True)
@@ -79,10 +80,10 @@ elif option == 3:
         log_file_id=main_id
     )
 
-    agent.logger.info('[I] Chose evaluating custom model')
+    agent.logger.info('[I] Chose evaluating custom model A')
     model_name = input('[*] Introduce the name of the model: ')
     agent.load_custom_model(model_name)
-    agent.evaluate(ENV, 1000)
+    agent.evaluate(ENV, CUSTOM_EVALUATION_EPISODES)
 
 elif option == 4:
     ENV = EnvironmentB(main_id, True)
@@ -95,7 +96,7 @@ elif option == 4:
     agent.logger.info('[I] Chose evaluating custom model B routes')
     routing_model_name = input('[*] Introduce the name of the model: ')
     agent.load_custom_model(routing_model_name)
-    agent.evaluate_routes(ENV, 100)
+    agent.evaluate_routes(ENV, ROUTE_EVALUATION_EPISODES)
 
 elif option == 5:
     ENV = EnvironmentB(main_id, True)
@@ -108,7 +109,7 @@ elif option == 5:
     agent.logger.info('[I] Chose evaluating custom model B')
     model_name = input('[*] Introduce the name of the model: ')
     agent.load_custom_model(model_name)
-    agent.evaluate(ENV, 1000)
+    agent.evaluate(ENV, CUSTOM_EVALUATION_EPISODES)
 
 elif option == 6:
     ENV = EnvironmentTSN(main_id, True)
@@ -123,4 +124,4 @@ elif option == 6:
     agent.agent_A.load_custom_model(model_name)
     model_name = input('[*] Introduce the name of the model B: ')
     agent.agent_B.load_custom_model(model_name)
-    agent.evaluate(ENV, 1000)
+    agent.evaluate(ENV, CUSTOM_EVALUATION_EPISODES)
